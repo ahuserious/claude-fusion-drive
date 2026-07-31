@@ -53,6 +53,15 @@ instead of retrying.
   provider_list, cost_estimate, config_history, config_rollback_propose,
   human_sim_plan/pause/resume/abort/report) with 11 new tests: 345 passed,
   1 skipped, 425 subtests — green. Bench pins recomputed.
+- 2026-07-31: Docs adapted to the Claude Code host contract (17 files);
+  suite re-verified green: 345 passed, 1 skipped, 425 subtests.
+- 2026-07-31: Published to https://github.com/ahuserious/claude-fusion-drive
+  (main, a9a6085). Marketplace re-added from the GitHub source;
+  `claude plugin install claude-fusion-drive@claude-fusion-drive` succeeded;
+  `claude plugin list` shows 0.1.0 enabled (user scope) pinned to a9a6085;
+  `claude plugin details` shows 6 skills + 1 MCP server; the MCP server in the
+  installed cache copy answers initialize/tools-list/workflow_report with 61
+  tools and profile xai-claude-oauth. All acceptance criteria hold.
 - 2026-07-31: Stdio MCP smoke: 61 tools, zero PRD-required tools missing;
   gate_set_list/provider_list/cost_estimate/preset_resolve/config_history all
   OK; grok-fusion-drive driver resolves to claude_host claude-fable-5 max with
