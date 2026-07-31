@@ -1,0 +1,272 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/DanRepaci/claude-fusion-drive/schemas/fusion-drive.schema.json",
+  "title": "Claude Fusion Drive configuration",
+  "description": "Schema-v2 control-plane configuration. Runtime validation also enforces cross-reference and invariant rules.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "active_profile",
+    "providers",
+    "seats",
+    "engines",
+    "gate_sets",
+    "profiles",
+    "subagent_presets",
+    "lifecycle",
+    "batching",
+    "integrations",
+    "rescue",
+    "human_sim_users",
+    "auto_eval",
+    "reporting"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 2
+    },
+    "active_profile": {
+      "type": "string"
+    },
+    "providers": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/provider"
+      }
+    },
+    "seats": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/seat"
+      }
+    },
+    "engines": {
+      "type": "object",
+      "required": [
+        "in_harness",
+        "subscription_oauth",
+        "xai_claude_oauth",
+        "openrouter_fusion",
+        "all_grok_4_5"
+      ],
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
+    "gate_sets": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
+    "subagent_presets": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "required": [
+        "require_explicit_user_confirmation",
+        "require_claude_goal_before_execution",
+        "host_goal_creation_tool"
+      ],
+      "properties": {
+        "require_explicit_user_confirmation": {
+          "const": true
+        },
+        "require_claude_goal_before_execution": {
+          "const": true
+        },
+        "host_goal_creation_tool": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "batching": {
+      "type": "object"
+    },
+    "integrations": {
+      "type": "object"
+    },
+    "rescue": {
+      "type": "object"
+    },
+    "human_sim_users": {
+      "type": "object"
+    },
+    "auto_eval": {
+      "type": "object"
+    },
+    "reporting": {
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "provider": {
+      "type": "object",
+      "required": [
+        "enabled",
+        "transport",
+        "auth",
+        "billing",
+        "max_concurrency",
+        "async_batch"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "transport": {
+          "enum": [
+            "xai_responses",
+            "openrouter_chat",
+            "openrouter_fusion",
+            "openai_responses",
+            "anthropic_messages",
+            "grok_cli_oauth",
+            "claude_cli_oauth",
+            "claude_host"
+          ]
+        },
+        "base_url": {
+          "type": "string"
+        },
+        "command": {
+          "type": "string"
+        },
+        "auth": {
+          "type": "object"
+        },
+        "billing": {
+          "type": "string"
+        },
+        "allocated_subscription_cost_usd_per_month": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "max_concurrency": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "request_timeout_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "max_retries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "async_batch": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "seat": {
+      "type": "object",
+      "required": [
+        "enabled",
+        "provider",
+        "model",
+        "role",
+        "persona",
+        "reasoning",
+        "effective_reasoning",
+        "reasoning_max_tokens",
+        "max_output_tokens",
+        "timeout_seconds",
+        "tool_policy",
+        "structured_output"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "panel",
+            "judge",
+            "fuser",
+            "verifier"
+          ]
+        },
+        "persona": {
+          "type": "string"
+        },
+        "reasoning": {
+          "enum": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ]
+        },
+        "effective_reasoning": {
+          "enum": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ]
+        },
+        "reasoning_max_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "timeout_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "tool_policy": {
+          "type": "string"
+        },
+        "structured_output": {
+          "type": "string"
+        },
+        "openrouter_fusion": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

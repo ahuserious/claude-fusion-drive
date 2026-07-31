@@ -1,0 +1,35 @@
+name: verify
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.12", "3.14"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile
+        run: python -m compileall -q plugins/claude-fusion-drive
+      - name: Validate plugin package
+        run: python -m unittest tests.test_package_integrity -v
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Validate JSON syntax
+        run: |
+          python -m json.tool .claude-plugin/marketplace.json >/dev/null
+          python -m json.tool plugins/claude-fusion-drive/.claude-plugin/plugin.json >/dev/null
+          python -m json.tool plugins/claude-fusion-drive/.mcp.json >/dev/null
+          python -m json.tool plugins/claude-fusion-drive/config/default.json >/dev/null
+          python -m json.tool plugins/claude-fusion-drive/config/fusion-drive.default.json >/dev/null
+          python -m json.tool plugins/claude-fusion-drive/schemas/config.schema.json >/dev/null
+          python -m json.tool plugins/claude-fusion-drive/schemas/fusion-drive.schema.json >/dev/null

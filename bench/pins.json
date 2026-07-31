@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "codex": {
+    "version": "0.145.0-alpha.18",
+    "model": "openai/gpt-5.6-sol",
+    "reasoning_effort": "xhigh",
+    "agent_timeout_seconds": 3600,
+    "mcp_startup_timeout_seconds": 60,
+    "mcp_tool_timeout_seconds": 1800
+  },
+  "artifacts": {
+    "plugin_tree_sha256": "7a149f9130d37d1d107f1939095dc073f288c6407fea591a2512b9078827a197",
+    "benchmark_runtime_tree_sha256": "c3a6b47a2e795483a78712d950ae71310ae3ee8ae2b12f2b0c2692a643a610da",
+    "runner_sha256": "1805de7a3b1c5615cccb901065f23f329768838895123767e21b631b971abd2d",
+    "validator_sha256": "a4bd11f324f09758eea38127c003dc48e97136db463844b72c69c0809e015607"
+  },
+  "harbor": {
+    "version": "0.20.0",
+    "commit": "459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc",
+    "dataset": {
+      "name": "terminal-bench/terminal-bench-2",
+      "version": "1",
+      "source_repository": "https://github.com/harbor-framework/terminal-bench-2.git",
+      "source_commit": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c"
+    },
+    "tasks": {
+      "fix-git": {
+        "task_name": "terminal-bench/fix-git",
+        "image": "docker.io/alexgshaw/fix-git:20251031",
+        "image_digest": "sha256:61e431c00c58df652287aadce5457634d9f9330cfdd153ebdf2802df0d540119"
+      },
+      "regex-log": {
+        "task_name": "terminal-bench/regex-log",
+        "image": "docker.io/alexgshaw/regex-log:20251031",
+        "image_digest": "sha256:90101b2e815323a8da20528a1439bebc407eb9761c9c68a3d557730856c878e9"
+      }
+    }
+  },
+  "pier": {
+    "version": "0.3.0",
+    "dataset": {
+      "name": "datacurve/deep-swe",
+      "source_repository": "https://github.com/datacurve-ai/deep-swe.git",
+      "source_commit": "6db64a40f3318d8659238ff34a8cc4b491c49205"
+    },
+    "tasks": {
+      "anko-default-function-arguments": {
+        "task_name": "datacurve/anko-default-function-arguments",
+        "image": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh7fj3hc92zehtc8azrm32xzb182w9dr-v1.1",
+        "image_digest": "sha256:31c8dce39317314800d1200610475ba27b98c71350d524d25e7df71d80c5752a",
+        "base_commit": "9d2d84bb1564e9513287998c56ccf16c01c19008",
+        "expected": {
+          "f2p_passed": 2,
+          "f2p_total": 2,
+          "p2p_passed": 119,
+          "p2p_total": 119
+        }
+      },
+      "geo-shapeindex-serialization": {
+        "task_name": "datacurve/geo-shapeindex-serialization",
+        "image": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh74gd4v9cty7573mr6k7va39183ngrq-v1.1",
+        "image_digest": "sha256:4600e819ba93437df00f1d1ddb07597818bf53e0a3153bd689093e946ccb52d7",
+        "base_commit": "87f5a40ea07a4ea629ee5623c72660f3d1b217fa",
+        "expected": {
+          "f2p_passed": 24,
+          "f2p_total": 24,
+          "p2p_passed": 599,
+          "p2p_total": 599
+        }
+      }
+    }
+  }
+}

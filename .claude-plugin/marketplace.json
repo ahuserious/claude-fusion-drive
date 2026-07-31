@@ -1,0 +1,24 @@
+{
+  "name": "claude-fusion-drive",
+  "owner": {
+    "name": "DanBot",
+    "url": "https://github.com/ahuserious"
+  },
+  "metadata": {
+    "description": "Claude Code-native fusion, verification gates, rescue, human simulation, and deterministic auto-evaluation.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "claude-fusion-drive",
+      "description": "Plan with fused frontier models and verify every execution gate from Claude Code.",
+      "version": "0.1.0",
+      "author": {
+        "name": "DanBot",
+        "url": "https://github.com/ahuserious"
+      },
+      "source": "./plugins/claude-fusion-drive",
+      "category": "Developer Tools"
+    }
+  ]
+}

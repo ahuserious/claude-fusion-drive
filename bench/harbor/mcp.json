@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "claude-fusion-drive": {
+      "command": "/opt/claude-fusion-drive-bench/mcp_server_launcher.py",
+      "args": []
+    }
+  }
+}
