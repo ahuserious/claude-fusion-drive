@@ -15,8 +15,9 @@ Subcommands:
                            exaflop = grok45 xhigh + sol high mini panel with
                            a grok45 review judge reporting to the
                            orchestrator; auto-applies to dynamic workflows.
-  config                   Open the plugin configuration (user config in
-                           $EDITOR; prints default/user paths).
+  config [full|open]       Show the configuration in the terminal (default:
+                           colored summary; `full` = merged JSON; `open` =
+                           GUI editor).
   slots [set <n> <profile>]  Show or edit the statusline hotkey slots.
   status                   One-line summary (same data the statusline shows).
 
@@ -163,18 +164,65 @@ def cmd_review(action: str) -> int:
     return 0
 
 
-def cmd_config() -> int:
-    from claude_fusion_drive.config import user_config_path
+DIM, BOLD, RESET = "\033[2m", "\033[1m", "\033[0m"
+CYAN, GREEN, RED = "\033[36m", "\033[32m", "\033[31m"
+
+
+def _seat_line(config: dict, seat_name: str) -> str:
+    seat = config.get("seats", {}).get(seat_name, {})
+    return f"{seat.get('model', '?')}@{seat.get('effective_reasoning', '?')}"
+
+
+def cmd_config(mode: str = "") -> int:
+    from claude_fusion_drive.config import load_config, redact, user_config_path
 
     default_path = PLUGIN_ROOT / "config" / "fusion-drive.default.json"
     user_path = user_config_path()
-    print(f"default: {default_path}")
-    print(f"user:    {user_path}")
-    editor = os.environ.get("EDITOR")
-    if editor:
-        os.execvp(editor, [editor, str(user_path)])
-    if sys.platform == "darwin":
-        os.execvp("open", ["open", str(user_path)])
+    config = load_config()
+
+    if mode == "open":
+        # GUI opener only — a terminal $EDITOR (vim/nano) would hang without a
+        # tty, e.g. under the Claude Code `!` shell escape.
+        import subprocess
+
+        result = subprocess.run(["open", str(user_path)], capture_output=True, text=True)
+        print(f"opened {user_path}" if result.returncode == 0
+              else f"open failed: {result.stderr.strip() or result.returncode}")
+        return 0
+    if mode == "full":
+        print(json.dumps(redact(config), indent=2, sort_keys=True))
+        return 0
+
+    active = str(config.get("active_profile"))
+    print(f"{BOLD}⚛ Claude Fusion Drive config{RESET}  {DIM}(fusion config full | open){RESET}")
+    print(f"{DIM}default{RESET} {default_path}")
+    print(f"{DIM}user   {RESET} {user_path}")
+    print()
+    print(f"{BOLD}profiles{RESET}")
+    for name, profile in sorted(config.get("profiles", {}).items()):
+        engine = config.get("engines", {}).get(str(profile.get("engine")), {})
+        marker = f"{CYAN}▶{RESET}" if name == active else " "
+        if engine.get("kind") == "server_managed":
+            topo = f"panel {'+'.join(engine.get('analysis_models', []))} · judge+fuse {engine.get('judge_model')}"
+        else:
+            panel = " + ".join(_seat_line(config, s) for s in engine.get("panel", []))
+            topo = (f"panel {panel} · judge {_seat_line(config, str(engine.get('judge')))}"
+                    f" · fuse {_seat_line(config, str(engine.get('fuser')))}")
+        print(f" {marker} {BOLD}{name}{RESET} {DIM}[{profile.get('engine')}]{RESET}")
+        print(f"      {topo}")
+    print()
+    print(f"{BOLD}providers{RESET}")
+    for name, provider in sorted(config.get("providers", {}).items()):
+        state = f"{GREEN}enabled{RESET}" if provider.get("enabled") else f"{DIM}disabled{RESET}"
+        print(f"   {name:<24}{state}  {DIM}{provider.get('transport')}{RESET}")
+    print()
+    state = load_toggles()
+    review = _review_value(state.get("subagent_review"))
+    print(f"{BOLD}toggles{RESET}   plan {'on' if state.get('fusion_plan') else 'off'}"
+          f" · preset {state.get('preset', 'high')} · review {review}"
+          f" · mini-fuse {'on' if mini_fuse_enabled(config) else 'off'}")
+    slots = load_slots()
+    print(f"{BOLD}slots{RESET}     " + "  ".join(f"{k}:{v}" for k, v in sorted(slots.items())))
     return 0
 
 
@@ -268,7 +316,7 @@ def main() -> int:
     if command == "review" and len(rest) == 1:
         return cmd_review(rest[0])
     if command == "config":
-        return cmd_config()
+        return cmd_config(rest[0] if rest else "")
     if command == "slots":
         return cmd_slots(rest)
     if command == "status":
