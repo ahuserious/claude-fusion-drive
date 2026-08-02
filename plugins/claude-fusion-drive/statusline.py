@@ -75,11 +75,12 @@ PROVIDER_SHORT = {
     "grok_oauth": "grok",
     "claude_oauth": "claude",
 }
-# Effort / preset level → (mini-bar glyph, color)
+# Effort / preset level → (superscript glyph, color) — no block glyphs; the
+# solid bars read as stray highlights next to chip backgrounds.
 EFFORT_STYLE = {
-    "none": ("▁", DIM_C), "minimal": ("▁", 108), "low": ("▂", 77),
-    "medium": ("▄", 148), "high": ("▆", 220), "xhigh": ("▇", 208),
-    "max": ("█", 199), "ultra": ("█", 201),
+    "none": ("°", DIM_C), "minimal": ("ⁱ", 108), "low": ("ˡ", 77),
+    "medium": ("ᵐ", 148), "high": ("ʰ", 220), "xhigh": ("ˣ", 208),
+    "max": ("ᴹ", 199), "ultra": ("ᵁ", 201),
 }
 STATE_SHORT = {
     "awaiting_plan_gate": "plan-gate",
@@ -123,11 +124,9 @@ def model_chip(model: str, effort: str | None = None) -> str:
     name = short_model(model)
     if effort is None:
         return chip(bg_color, fg_color, name)
-    bar, bar_color = EFFORT_STYLE.get(effort, ("?", DIM_C))
-    return (
-        f"\033[48;5;{bg_color}m\033[38;5;{fg_color}m{name}"
-        f"\033[38;5;{bar_color}m{bar}{RESET}"
-    )
+    # Effort marker sits OUTSIDE the chip so nothing highlighted trails the name.
+    sup, sup_color = EFFORT_STYLE.get(effort, ("?", DIM_C))
+    return f"{chip(bg_color, fg_color, name)}{fg(sup_color, sup)}"
 
 
 def short_profile(name: str) -> str:
@@ -214,9 +213,9 @@ def toggles_segment(sl_config: dict) -> str:
     plan_on = bool(state.get("fusion_plan"))
     review_on = bool(state.get("subagent_review"))
     preset = str(state.get("preset", "high"))
-    bar, bar_color = EFFORT_STYLE.get(preset, ("?", DIM_C))
+    sup, sup_color = EFFORT_STYLE.get(preset, ("?", DIM_C))
     plan = f"{fg(LABEL_C, 'plan')}{fg(GOOD_C if plan_on else BAD_C, '●' if plan_on else '○')}"
-    pset = f"{fg(LABEL_C, 'pset')}{fg(bar_color, bar)}"
+    pset = f"{fg(LABEL_C, 'pset')}{fg(sup_color, sup)}"
     review = f"{fg(LABEL_C, 'rev')}{fg(GOOD_C if review_on else BAD_C, '●' if review_on else '○')}"
     return f"{plan} {pset} {review}"
 
