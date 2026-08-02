@@ -7,9 +7,16 @@ Subcommands:
                            and adversarial-review summarization.
   plan on|off              Fusion-plan toggle: planning runs use full fusion
                            at the configured preset level.
-  preset low|medium|high   Fusion preset intensity (default high).
-  review on|off            Subagent review: completed subagents and dynamic-
-                           workflow agents get a Grok 4.5 xhigh review pass.
+  preset up|down|<level>   Fusion preset ladder off→low→medium→high
+                           (default high). `up`/`down` step the ladder —
+                           repeated `down` reaches off.
+  review up|down|<level>   Subagent review ladder off→light→exaflop
+                           (default light). light = mini-fuse compression;
+                           exaflop = grok45 xhigh + sol high mini panel with
+                           a grok45 review judge reporting to the
+                           orchestrator; auto-applies to dynamic workflows.
+  config                   Open the plugin configuration (user config in
+                           $EDITOR; prints default/user paths).
   slots [set <n> <profile>]  Show or edit the statusline hotkey slots.
   status                   One-line summary (same data the statusline shows).
 
@@ -22,6 +29,7 @@ user action, which is why approval is auto-confirmed here.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -41,7 +49,10 @@ DEFAULT_SLOTS = {
     "2": "all-grok-4.5",
     "3": "maximum-intelligence",
     "4": "mini-fuse",
+    "5": "exaflop-reactor",
 }
+PRESET_LADDER = ["off", "low", "medium", "high"]
+REVIEW_LADDER = ["off", "light", "exaflop"]
 
 
 def slots_path() -> Path:
@@ -79,7 +90,7 @@ def save_slots(slots: dict[str, str]) -> None:
     save_statusline_config(data)
 
 
-DEFAULT_TOGGLES = {"fusion_plan": True, "preset": "high", "subagent_review": True}
+DEFAULT_TOGGLES = {"fusion_plan": True, "preset": "high", "subagent_review": "light"}
 
 
 def load_toggles() -> dict:
@@ -107,12 +118,63 @@ def cmd_toggle(key: str, label: str, action: str) -> int:
     return 0
 
 
-def cmd_preset(level: str) -> int:
-    if level not in {"low", "medium", "high"}:
-        print("usage: fusion_ctl.py preset low|medium|high")
+def _ladder_step(ladder: list[str], current: str, action: str) -> str:
+    index = ladder.index(current) if current in ladder else len(ladder) - 1
+    if action == "up":
+        index = min(index + 1, len(ladder) - 1)
+    else:
+        index = max(index - 1, 0)
+    return ladder[index]
+
+
+def cmd_preset(action: str) -> int:
+    if action in {"up", "down"}:
+        level = _ladder_step(PRESET_LADDER, str(load_toggles().get("preset", "high")), action)
+    elif action in PRESET_LADDER:
+        level = action
+    else:
+        print("usage: fusion_ctl.py preset up|down|off|low|medium|high")
         return 1
     save_toggle("preset", level)
     print(f"preset → {level}")
+    return 0
+
+
+def _review_value(raw) -> str:
+    if raw is True:
+        return "light"
+    if raw is False:
+        return "off"
+    return raw if raw in REVIEW_LADDER else "light"
+
+
+def cmd_review(action: str) -> int:
+    if action in {"on", "off"}:
+        action = "light" if action == "on" else "off"
+    if action in {"up", "down"}:
+        level = _ladder_step(REVIEW_LADDER, _review_value(load_toggles().get("subagent_review")), action)
+    elif action in REVIEW_LADDER:
+        level = action
+    else:
+        print("usage: fusion_ctl.py review up|down|off|light|exaflop")
+        return 1
+    save_toggle("subagent_review", level)
+    print(f"review → {level}")
+    return 0
+
+
+def cmd_config() -> int:
+    from claude_fusion_drive.config import user_config_path
+
+    default_path = PLUGIN_ROOT / "config" / "fusion-drive.default.json"
+    user_path = user_config_path()
+    print(f"default: {default_path}")
+    print(f"user:    {user_path}")
+    editor = os.environ.get("EDITOR")
+    if editor:
+        os.execvp(editor, [editor, str(user_path)])
+    if sys.platform == "darwin":
+        os.execvp("open", ["open", str(user_path)])
     return 0
 
 
@@ -185,7 +247,7 @@ def cmd_status() -> int:
     state = load_toggles()
     print(f"fusion-plan: {'on' if state.get('fusion_plan') else 'off'}  "
           f"preset: {state.get('preset', 'high')}  "
-          f"subagent-review: {'on' if state.get('subagent_review') else 'off'}")
+          f"subagent-review: {_review_value(state.get('subagent_review'))}")
     return 0
 
 
@@ -204,7 +266,9 @@ def main() -> int:
     if command == "preset" and len(rest) == 1:
         return cmd_preset(rest[0])
     if command == "review" and len(rest) == 1:
-        return cmd_toggle("subagent_review", "review", rest[0])
+        return cmd_review(rest[0])
+    if command == "config":
+        return cmd_config()
     if command == "slots":
         return cmd_slots(rest)
     if command == "status":

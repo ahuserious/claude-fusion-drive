@@ -181,3 +181,21 @@ statusline:
   contract — insert review/verify stages for completed agents only when
   `subagent_review` is on, and choose planning-stage fusion depth from
   `fusion_plan` + `preset`.
+
+## Exaflop-reactor preset
+
+- Profile `exaflop-reactor` = the planning/fusion engine `exaflop_reactor`:
+  panel GPT 5.6 sol ×2 (xhigh, direct `openai_api`) + Fable 5 (xhigh), judge
+  Grok 4.5, fuser Fable 5 (xhigh). Select with `fusion_ctl.py profile 5`.
+- Subagent preset `exaflop-reactor` = execution subagents at Grok 4.5 xhigh
+  whose completed work runs through engine `exaflop_mini`: mini panel Grok
+  4.5 xhigh + GPT 5.6 sol high, review judge Grok 4.5 xhigh, and the low
+  mini fuser compressing the report sent back to the orchestrator.
+- **Automatic trigger on dynamic workflows**: when the review ladder is at
+  `exaflop` (see `fusion_ctl.py review`), completed agents in host-composed
+  Workflow runs get the exaflop_mini review/report pass; at `light` they get
+  plain mini-fuse compression; at `off`, no review stage.
+- The review ladder (`off → light → exaflop`) and preset ladder
+  (`off → low → medium → high`) are stepped with `fusion_ctl.py review
+  up|down` and `preset up|down`; `fusion_ctl.py config` opens the plugin
+  configuration.

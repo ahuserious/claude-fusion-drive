@@ -58,7 +58,7 @@
       }
     },
     "openai_api": {
-      "enabled": false,
+      "enabled": true,
       "transport": "openai_responses",
       "base_url": "https://api.openai.com/v1",
       "auth": {
@@ -440,6 +440,34 @@
       "tool_policy": "none",
       "structured_output": "panel_report"
     },
+    "grok45-xr-mini-panel": {
+      "enabled": true,
+      "provider": "xai_api",
+      "model": "grok-4.5",
+      "role": "panel",
+      "persona": "Exaflop mini-fuse reviewer; verify the completed subagent result against its task at full depth.",
+      "reasoning": "xhigh",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 8192,
+      "timeout_seconds": 600,
+      "tool_policy": "none",
+      "structured_output": "panel_report"
+    },
+    "grok45-xr-review": {
+      "enabled": true,
+      "provider": "xai_api",
+      "model": "grok-4.5",
+      "role": "judge",
+      "persona": "Exaflop review judge; reconcile the mini panel reviews and flag contradictions for the orchestrator report.",
+      "reasoning": "xhigh",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 4096,
+      "timeout_seconds": 600,
+      "tool_policy": "none",
+      "structured_output": "judge_analysis"
+    },
     "openrouter-fusion-seat": {
       "enabled": true,
       "provider": "openrouter_fusion_api",
@@ -469,6 +497,48 @@
         "max_completion_tokens": 49152,
         "temperature": 1.0
       }
+    },
+    "sol-xr-mini-panel": {
+      "enabled": true,
+      "provider": "openai_api",
+      "model": "gpt-5.6-sol",
+      "role": "panel",
+      "persona": "Exaflop mini-fuse second reviewer; independent GPT 5.6 sol check of the subagent result.",
+      "reasoning": "high",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 8192,
+      "timeout_seconds": 600,
+      "tool_policy": "none",
+      "structured_output": "panel_report"
+    },
+    "sol-xr-panel-a": {
+      "enabled": true,
+      "provider": "openai_api",
+      "model": "gpt-5.6-sol",
+      "role": "panel",
+      "persona": "Independent GPT 5.6 sol systems planner for exaflop-reactor; trace constraints and edge cases.",
+      "reasoning": "xhigh",
+      "effective_reasoning": "xhigh",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 32768,
+      "timeout_seconds": 900,
+      "tool_policy": "none",
+      "structured_output": "panel_report"
+    },
+    "sol-xr-panel-b": {
+      "enabled": true,
+      "provider": "openai_api",
+      "model": "gpt-5.6-sol",
+      "role": "panel",
+      "persona": "Independent GPT 5.6 sol adversarial falsifier for exaflop-reactor; seek counterexamples.",
+      "reasoning": "xhigh",
+      "effective_reasoning": "xhigh",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 32768,
+      "timeout_seconds": 900,
+      "tool_policy": "none",
+      "structured_output": "panel_report"
     }
   },
   "engines": {
@@ -488,6 +558,41 @@
       "prohibit_majority_vote": true,
       "preserve_minority_findings": true,
       "max_fusion_depth": 1
+    },
+    "exaflop_mini": {
+      "anonymize_model_identity": true,
+      "fuser": "grok45-mini-fuser",
+      "independent_first_pass": true,
+      "judge": "grok45-xr-review",
+      "kind": "client_orchestrated",
+      "max_concurrency": 2,
+      "max_fusion_depth": 1,
+      "min_live_seats": 2,
+      "optional_panel": [],
+      "panel": [
+        "grok45-xr-mini-panel",
+        "sol-xr-mini-panel"
+      ],
+      "preserve_minority_findings": true,
+      "prohibit_majority_vote": true
+    },
+    "exaflop_reactor": {
+      "anonymize_model_identity": true,
+      "fuser": "fable5-oauth-fuser",
+      "independent_first_pass": true,
+      "judge": "all-grok-judge",
+      "kind": "client_orchestrated",
+      "max_concurrency": 3,
+      "max_fusion_depth": 1,
+      "min_live_seats": 3,
+      "optional_panel": [],
+      "panel": [
+        "sol-xr-panel-a",
+        "sol-xr-panel-b",
+        "fable5-oauth-panel"
+      ],
+      "preserve_minority_findings": true,
+      "prohibit_majority_vote": true
     },
     "in_harness": {
       "kind": "client_orchestrated",
@@ -866,6 +971,63 @@
         "allow_recursive_claude_cli": false
       }
     },
+    "exaflop-mini": {
+      "budgets": {
+        "enforcement": "hard_stop",
+        "unknown_cost_policy": "report_unknown",
+        "max_calls": 40,
+        "max_total_tokens": 600000,
+        "max_input_tokens": 400000,
+        "max_output_tokens": 100000,
+        "max_reasoning_tokens": null,
+        "max_tool_calls": 32,
+        "max_wall_seconds": null,
+        "max_cost_usd": 25.0,
+        "approval_threshold_usd": 10.0,
+        "warning_fraction": 0.8,
+        "reserve_fraction_for_synthesis_and_gates": 0.3
+      },
+      "engine": "exaflop_mini",
+      "execution": {
+        "allow_recursive_claude_cli": false,
+        "model": "claude-fable-5",
+        "owner": "claude_host",
+        "reasoning": "low",
+        "require_claude_goal": true,
+        "require_confirmed_plan": true
+      },
+      "gate_set": "approval-gates"
+    },
+    "exaflop-reactor": {
+      "budgets": {
+        "enforcement": "hard_stop",
+        "unknown_cost_policy": "report_unknown",
+        "max_calls": 80,
+        "max_total_tokens": 4000000,
+        "max_input_tokens": 2400000,
+        "max_output_tokens": 800000,
+        "max_reasoning_tokens": null,
+        "max_tool_calls": 128,
+        "max_wall_seconds": null,
+        "max_cost_usd": 150.0,
+        "approval_threshold_usd": 25.0,
+        "warning_fraction": 0.8,
+        "reserve_fraction_for_synthesis_and_gates": 0.3
+      },
+      "engine": "exaflop_reactor",
+      "execution": {
+        "allow_recursive_claude_cli": false,
+        "max_fix_cycles": 2,
+        "model": "claude-fable-5",
+        "owner": "claude_host",
+        "reasoning": "xhigh",
+        "require_claude_goal": true,
+        "require_confirmed_plan": true,
+        "require_diff_review": true,
+        "run_tests": true
+      },
+      "gate_set": "approval-gates"
+    },
     "maximum-intelligence": {
       "engine": "in_harness",
       "gate_set": "approval-gates",
@@ -1037,6 +1199,19 @@
       "batch_mode": "bounded_microbatch",
       "max_parallel_subagents": 3,
       "max_fusion_depth": 1
+    },
+    "exaflop-reactor": {
+      "batch_mode": "bounded_microbatch",
+      "driver": {
+        "model": "claude-fable-5",
+        "owner": "claude_host",
+        "reasoning": "xhigh"
+      },
+      "gate_set": "approval-gates",
+      "max_fusion_depth": 1,
+      "max_parallel_subagents": 4,
+      "worker_engine": "exaflop_mini",
+      "worker_reasoning": "xhigh"
     },
     "grok-fusion-drive": {
       "driver": {

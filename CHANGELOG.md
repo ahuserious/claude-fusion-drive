@@ -1,5 +1,12 @@
 # Changelog
 
+## Claude Fusion Drive 0.1.3 (Claude Code edition) - 2026-08-02
+
+- Added the **exaflop-reactor** preset: planning engine `exaflop_reactor` (panel GPT 5.6 sol ×2 xhigh via direct `openai_api` + Fable 5 xhigh, judge Grok 4.5, fuser Fable 5 xhigh) and execution engine `exaflop_mini` (subagents Grok 4.5 xhigh; completed work reviewed by a Grok 4.5 xhigh + GPT 5.6 sol high mini panel with a Grok 4.5 review judge, compressed and reported back to the orchestrator; auto-applies to dynamic workflows at review level `exaflop`). `openai_api` is now enabled by default.
+- Intensity ladders in `fusion_ctl.py`: `preset up|down` steps off→low→medium→high; `review up|down` steps off→light→exaflop; `config` opens the plugin configuration. Statusline shows ladder state and the `⁵exa` profile slot.
+- Added the user-level `/statusline-dev` skill for iterating on the statusline.
+- Statusline readability redesign retained: labeled roles, one mark language, model family chips, colored effort superscripts.
+
 ## Claude Fusion Drive 0.1.2 (Claude Code edition) - 2026-08-02
 
 - Added `statusline.py`, a Claude Code statusline showing the active profile, fusion topology (panel/judge/fuser with effective reasoning), provider sign-in state, mini-fuse on/off, live job and workflow status from the runtime dir, Braintrust link state, and configurable numbered profile slots.

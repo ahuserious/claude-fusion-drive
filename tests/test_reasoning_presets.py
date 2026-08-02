@@ -74,4 +74,4 @@ def test_presets_resolve_deterministically() -> None:
     first = list_presets(config)
     second = list_presets(config)
     assert first == second
-    assert set(first) == {"all-grok-4.5", "canonical-in-harness", "grok-fusion-drive", "mini-fuse"}
+    assert set(first) == {"all-grok-4.5", "canonical-in-harness", "exaflop-reactor", "grok-fusion-drive", "mini-fuse"}

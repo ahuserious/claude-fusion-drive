@@ -1,6 +1,6 @@
 {
   "name": "claude-fusion-drive",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Maximum-intelligence Claude Code planning, multi-model fusion, lifecycle gates, rescue, human simulation, and deterministic auto-evaluation.",
   "author": {
     "name": "DanBot",

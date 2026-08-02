@@ -97,7 +97,7 @@ STATE_SHORT = {
 SUPERSCRIPT = {"1": "¹", "2": "²", "3": "³", "4": "⁴",
                "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹"}
 MINI_FUSE_SEATS = ("grok45-mini-panel", "grok45-mini-judge", "grok45-mini-fuser")
-DEFAULT_TOGGLES = {"fusion_plan": True, "preset": "high", "subagent_review": True}
+DEFAULT_TOGGLES = {"fusion_plan": True, "preset": "high", "subagent_review": "light"}
 
 
 def visible_length(text: str) -> int:
@@ -135,6 +135,7 @@ def short_profile(name: str) -> str:
         "xai-claude-oauth": "xai", "all-grok-4.5": "grok",
         "maximum-intelligence": "max", "openrouter-fusion": "orf",
         "subscription-oauth": "sub", "mini-fuse": "mini",
+        "exaflop-reactor": "exa", "exaflop-mini": "exam",
     }
     return known.get(name, name.split("-")[0][:5])
 
@@ -215,16 +216,29 @@ def toggles(sl_config: dict) -> dict:
     return merged
 
 
+def review_level(raw) -> str:
+    if raw is True:
+        return "light"
+    if raw is False:
+        return "off"
+    return raw if raw in {"off", "light", "exaflop"} else "light"
+
+
 def toggles_segment(config: dict, sl_config: dict) -> str:
     state = toggles(sl_config)
     plan_on = bool(state.get("fusion_plan"))
-    review_on = bool(state.get("subagent_review"))
+    review = review_level(state.get("subagent_review"))
     preset = str(state.get("preset", "high"))
-    _, preset_color = EFFORT_STYLE.get(preset, ("?", DIM_C))
+    preset_color = BAD_C if preset == "off" else EFFORT_STYLE.get(preset, ("?", DIM_C))[1]
     mark = lambda on: fg(GOOD_C if on else BAD_C, "✓" if on else "✗")
     plan = f"{fg(DIM_C, 'plan')}{mark(plan_on)}{fg(SEP_C, '·')}{fg(preset_color, preset)}"
-    review = f"{fg(DIM_C, 'review')}{mark(review_on)}"
-    return f"{mini_fuse_segment(config)} {plan} {review}"
+    if review == "off":
+        review_part = f"{fg(DIM_C, 'review')}{fg(BAD_C, '✗')}"
+    elif review == "exaflop":
+        review_part = f"{fg(DIM_C, 'review')}{fg(GOOD_C, '✓')}{fg(SEP_C, '·')}{fg(208, 'exaflop')}"
+    else:  # light is the default — implicit
+        review_part = f"{fg(DIM_C, 'review')}{fg(GOOD_C, '✓')}"
+    return f"{mini_fuse_segment(config)} {plan} {review_part}"
 
 
 def live_segment(state_root: Path) -> str:
@@ -283,7 +297,8 @@ def read_statusline_config(state_root: Path) -> dict:
 
 def slots_segment(sl_config: dict, config: dict) -> str:
     slots = {"1": "xai-claude-oauth", "2": "all-grok-4.5",
-             "3": "maximum-intelligence", "4": "mini-fuse"}
+             "3": "maximum-intelligence", "4": "mini-fuse",
+             "5": "exaflop-reactor"}
     if isinstance(sl_config.get("slots"), dict) and sl_config["slots"]:
         slots = {str(k): str(v) for k, v in sl_config["slots"].items()}
     active = config.get("active_profile")
@@ -299,7 +314,7 @@ def slots_segment(sl_config: dict, config: dict) -> str:
 
 
 def keys_segment() -> str:
-    return fg(DIM_C, "⌨!fusion plan|pset|rev")
+    return fg(DIM_C, "⌨!fusion preset↕ review↔ config")
 
 
 def width_budget(sl_config: dict) -> int:
