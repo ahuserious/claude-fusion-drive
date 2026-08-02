@@ -33,7 +33,7 @@ from claude_fusion_drive.config import (
     validate_config,
 )
 from claude_fusion_drive.engine import FusionDriveEngine, translate_config
-from claude_fusion_drive.errors import FusionDriveError
+from claude_fusion_drive.errors import ConfigurationError, FusionDriveError
 from claude_fusion_drive.human_sim import (
     abort_campaign,
     campaign_plan,
@@ -538,16 +538,28 @@ def call_tool(name: str, arguments: Mapping[str, Any]) -> Any:
         return legacy.call_tool(name, arguments)
     if name == "subagent_fuse":
         preset = resolve_preset(str(arguments["preset"]))
-        profile_by_engine = {
-            "all_grok_4_5": "all-grok-4.5",
-            "in_harness": "maximum-intelligence",
-            "openrouter_fusion": "openrouter-fusion",
-        }
+        drive = load_config()
+        worker_engine_name = str(preset["worker_engine_name"])
+        matching_profiles = sorted(
+            profile_name
+            for profile_name, profile in drive["profiles"].items()
+            if profile.get("engine") == worker_engine_name
+        )
+        if not matching_profiles:
+            raise ConfigurationError(
+                f"Preset '{preset['name']}' uses worker engine '{worker_engine_name}' "
+                "but no configured profile runs that engine"
+            )
+        active_profile = str(drive.get("active_profile", ""))
+        selected_profile = (
+            active_profile if active_profile in matching_profiles else matching_profiles[0]
+        )
         return {
             "preset": preset,
-            "batch": FusionDriveEngine().batch_fuse(
+            "profile": selected_profile,
+            "batch": FusionDriveEngine(drive).batch_fuse(
                 list(arguments["tasks"]),
-                profile_name=profile_by_engine[preset["worker_engine_name"]],
+                profile_name=selected_profile,
                 confirmed_external_costs=bool(arguments["confirmed_external_costs"]),
                 max_concurrency=arguments.get("max_concurrency"),
             ),

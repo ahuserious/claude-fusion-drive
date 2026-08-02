@@ -299,7 +299,30 @@ def test_fuse_returns_plan_report_and_stops_at_plan_gate(
 def test_approval_gate_records_lifecycle_receipt(isolated_runtime, monkeypatch) -> None:
     class FakeOrchestrator:
         def adversarial_gate(self, *args, **kwargs):
-            return {"passed": True, "verdict": "PASS", "reviews": []}
+            # Mirrors the real FusionOrchestrator.adversarial_gate wrapper shape:
+            # pass/fail lives on the nested "gate" dict, never at the top level.
+            return {
+                "run_id": "run-gate",
+                "artifacts_dir": "/tmp/fake-gate",
+                "gate": {
+                    "enabled": True,
+                    "passed": True,
+                    "pass_count": 2,
+                    "required_passes": 2,
+                    "fail_closed": True,
+                    "mechanical_failures": [],
+                    "mechanical_blocked": False,
+                    "schema_failures": [],
+                    "schema_blocked": False,
+                    "negative_verdicts": [],
+                    "negative_verdict_blocked": False,
+                    "unresolved_blind_spots": [],
+                    "blind_spot_blocked": False,
+                    "deterministic_blockers": [],
+                    "reviewers": [],
+                },
+                "ledger": {"known_cost_usd": 0.1},
+            }
 
     engine = FusionDriveEngine(load_config(include_user=False))
     monkeypatch.setattr(engine, "_orchestrator", lambda profile_name=None: (FakeOrchestrator(), "fusion_drive"))

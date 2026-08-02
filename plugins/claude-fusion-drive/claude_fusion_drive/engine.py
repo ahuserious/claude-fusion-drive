@@ -122,7 +122,8 @@ def _legacy_seat(
         "fuser": "grok45_synthesizer",
         "verifier": "grok45_verifier",
     }[role]
-    translated = copy.deepcopy(legacy["seats"][template_name])
+    template = legacy["seats"][template_name]
+    translated = copy.deepcopy(template)
     translated.update(
         {
             "enabled": bool(seat.get("enabled", True)),
@@ -147,6 +148,10 @@ def _legacy_seat(
         translated["fusion"] = copy.deepcopy(seat["openrouter_fusion"])
     else:
         translated.pop("fusion", None)
+    if seat["model"] != template.get("model"):
+        # Template pricing tables are per-model; a retargeted seat must report an
+        # honest unknown cost rather than bill at the template model's rates.
+        translated.pop("pricing", None)
     return translated
 
 
@@ -260,6 +265,31 @@ def translate_config(
     return legacy, translated_profile_name
 
 
+def _gate_verdict(gate: Mapping[str, Any]) -> str:
+    """Derive the lifecycle verdict from an orchestrator gate result dict."""
+    explicit = str(gate.get("verdict") or "").upper()
+    if explicit in {"PASS", "NEEDS_WORK", "FAIL"}:
+        return explicit
+    if gate.get("passed"):
+        return "PASS"
+    negative_reviews = gate.get("negative_verdicts") or []
+    blocked_beyond_reviews = (
+        gate.get("mechanical_blocked")
+        or gate.get("schema_blocked")
+        or gate.get("blind_spot_blocked")
+    )
+    if (
+        negative_reviews
+        and not blocked_beyond_reviews
+        and all(
+            (review.get("verdict") or {}).get("verdict") == "NEEDS_WORK"
+            for review in negative_reviews
+        )
+    ):
+        return "NEEDS_WORK"
+    return "FAIL"
+
+
 class FusionDriveEngine:
     def __init__(self, config: Mapping[str, Any] | None = None):
         self.config = dict(config or load_config())
@@ -338,20 +368,22 @@ class FusionDriveEngine:
     ) -> dict[str, Any]:
         selected_profile = profile_name or str(self.config["active_profile"])
         orchestrator, translated_profile = self._orchestrator(selected_profile)
-        gate = orchestrator.adversarial_gate(
+        gate_run = orchestrator.adversarial_gate(
             task,
             artifact,
             mechanical_evidence=mechanical_evidence,
             profile_name=translated_profile,
             run_id=resume_run_id,
         )
-        verdict = str(gate.get("verdict") or ("PASS" if gate.get("passed") else "FAIL")).upper()
-        if verdict not in {"PASS", "NEEDS_WORK", "FAIL"}:
-            verdict = "FAIL"
+        # adversarial_gate returns {"run_id", "artifacts_dir", "gate": {...}, "ledger"};
+        # the pass/fail data lives one level down on the inner gate dict.
+        inner_gate = gate_run.get("gate")
+        gate = inner_gate if isinstance(inner_gate, Mapping) else gate_run
+        verdict = _gate_verdict(gate)
         output: dict[str, Any] = {
             "stage": stage,
             "verdict": verdict,
-            "gate": gate,
+            "gate": gate_run,
             "artifact_sha256": text_hash(artifact),
             "profile": selected_profile,
             "engine": str(self.config["profiles"][selected_profile]["engine"]),

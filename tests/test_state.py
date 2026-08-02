@@ -970,5 +970,45 @@ class BudgetTrackerTests(unittest.TestCase):
         self.assertEqual(tracker.snapshot()["calls"], 1)
 
 
+class ApprovalThresholdTests(unittest.TestCase):
+    def test_hard_stop_records_warning_at_approval_threshold(self) -> None:
+        tracker = BudgetTracker(budget_config(approval_threshold_usd=0.05))
+        tracker.reserve_attempt("panel", "seat")
+        tracker.record(
+            "panel",
+            "seat",
+            response(usage=Usage(input_tokens=1, output_tokens=1, cost_usd=0.1)),
+        )
+        self.assertIn(
+            "Known cost reached the $0.05 approval threshold",
+            tracker.snapshot()["warnings"],
+        )
+
+    def test_approval_then_hard_stop_raises_at_approval_threshold(self) -> None:
+        tracker = BudgetTracker(
+            budget_config(approval_threshold_usd=0.05, enforcement="approval_then_hard_stop")
+        )
+        tracker.reserve_attempt("panel", "seat")
+        with self.assertRaisesRegex(BudgetExceeded, "approval threshold"):
+            tracker.record(
+                "panel",
+                "seat",
+                response(usage=Usage(input_tokens=1, output_tokens=1, cost_usd=0.1)),
+            )
+
+    def test_below_approval_threshold_adds_no_warning(self) -> None:
+        tracker = BudgetTracker(budget_config())
+        tracker.reserve_attempt("panel", "seat")
+        tracker.record(
+            "panel",
+            "seat",
+            response(usage=Usage(input_tokens=1, output_tokens=1, cost_usd=0.1)),
+        )
+        self.assertNotIn(
+            "Known cost reached the $25.00 approval threshold",
+            tracker.snapshot()["warnings"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

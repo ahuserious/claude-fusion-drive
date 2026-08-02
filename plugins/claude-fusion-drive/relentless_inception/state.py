@@ -1347,6 +1347,22 @@ class BudgetTracker:
                 warning = f"Known cost reached {float(warning_fraction):.0%} of the configured maximum"
                 if self.known_cost_usd >= threshold and warning not in self.warnings:
                     self.warnings.append(warning)
+            approval_threshold = self.config.get("approval_threshold_usd")
+            if (
+                isinstance(approval_threshold, (int, float))
+                and self.known_cost_usd >= float(approval_threshold)
+            ):
+                approval_message = (
+                    f"Known cost reached the ${float(approval_threshold):.2f} approval threshold"
+                )
+                if self._enforcement() == "approval_then_hard_stop":
+                    if self.stop_reason is None:
+                        self.stop_reason = approval_message
+                    raise BudgetExceeded(
+                        approval_message
+                        + "; host approval and an explicit budget configuration change are required"
+                    )
+                self._append_warning(approval_message)
 
             all_thresholds = exceeded_limits + exhausted_limits
             if all_thresholds:

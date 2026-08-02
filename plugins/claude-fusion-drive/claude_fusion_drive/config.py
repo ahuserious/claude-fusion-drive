@@ -14,6 +14,7 @@ from .util import (
     deep_get,
     deep_merge,
     deep_set,
+    exclusive_lock,
     json_copy,
     now_utc,
     read_json,
@@ -465,26 +466,29 @@ def propose_config(changes: Mapping[str, Any], *, rationale: str = "") -> dict[s
 def approve_config(proposal_hash: str, *, confirmed: bool) -> dict[str, Any]:
     if not confirmed:
         raise ConfigurationError("Configuration approval requires confirmed=true from an explicit user decision")
-    proposal = read_json(proposal_path(proposal_hash))
-    current = load_config()
-    if canonical_hash(current) != proposal.get("base_config_hash"):
-        raise ConfigurationError("Configuration changed after proposal; create a fresh proposal before approval")
-    candidate = proposal.get("candidate")
-    if not isinstance(candidate, Mapping) or canonical_hash(candidate) != proposal.get("candidate_config_hash"):
-        raise ConfigurationError("Proposal candidate hash does not match persisted content")
-    errors = validate_config(candidate)
-    if errors:
-        raise ConfigurationError("Persisted proposal no longer validates:\n- " + "\n- ".join(errors))
-    defaults = read_json(DEFAULT_CONFIG_PATH)
-    # Store the complete candidate to preserve the exact approved hash. The file
-    # contains no credentials because proposal validation rejects them.
-    atomic_write_json(user_config_path(), candidate)
-    applied = load_config()
-    if canonical_hash(applied) != canonical_hash(deep_merge(defaults, candidate)):
-        raise ConfigurationError("Applied configuration hash mismatch")
-    proposal["status"] = "approved"
-    proposal["approved_at"] = now_utc()
-    atomic_write_json(proposal_path(proposal_hash), proposal)
+    # The base-hash compare-and-swap below is only atomic while no concurrent
+    # approval can interleave between load_config and the user-config write.
+    with exclusive_lock(runtime_dir() / "proposals" / ".config.lock"):
+        proposal = read_json(proposal_path(proposal_hash))
+        current = load_config()
+        if canonical_hash(current) != proposal.get("base_config_hash"):
+            raise ConfigurationError("Configuration changed after proposal; create a fresh proposal before approval")
+        candidate = proposal.get("candidate")
+        if not isinstance(candidate, Mapping) or canonical_hash(candidate) != proposal.get("candidate_config_hash"):
+            raise ConfigurationError("Proposal candidate hash does not match persisted content")
+        errors = validate_config(candidate)
+        if errors:
+            raise ConfigurationError("Persisted proposal no longer validates:\n- " + "\n- ".join(errors))
+        defaults = read_json(DEFAULT_CONFIG_PATH)
+        # Store the complete candidate to preserve the exact approved hash. The file
+        # contains no credentials because proposal validation rejects them.
+        atomic_write_json(user_config_path(), candidate)
+        applied = load_config()
+        if canonical_hash(applied) != canonical_hash(deep_merge(defaults, candidate)):
+            raise ConfigurationError("Applied configuration hash mismatch")
+        proposal["status"] = "approved"
+        proposal["approved_at"] = now_utc()
+        atomic_write_json(proposal_path(proposal_hash), proposal)
     return {
         "approved": True,
         "proposal_hash": proposal_hash,

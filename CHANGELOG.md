@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased (0.1.1)
+
+- Fixed the approval-gate verdict nesting bug: `FusionDriveEngine.approval_gate` read `verdict`/`passed` off the orchestrator's wrapper dict instead of the nested gate result, so every gate auto-recorded FAIL — including 2/2 PASS receipts — and live workflows required manual `lifecycle_gate_record` transcription. Verdicts now derive from the inner gate dict (`PASS`, `NEEDS_WORK` when all negative reviewer verdicts are NEEDS_WORK with no deterministic blocks, otherwise `FAIL`). Added `tests/test_engine_gate_contract.py` running `approval_gate` through the real `FusionOrchestrator`, and corrected the engine test fake to the real wrapper shape.
+- Cost governance: `_legacy_seat` no longer copies a template's per-model pricing table onto a seat retargeted to a different model (honest unknown instead of billing at the template model's rates), and `approval_threshold_usd` is now enforced by `BudgetTracker` — a deduplicated ledger warning under `hard_stop`/`warn_only`, a `BudgetExceeded` requiring host approval under `approval_then_hard_stop`. OpenRouter usage-cost accounting needs no request opt-in: the current API always returns `usage.cost`, which the response parser already consumes.
+- Robustness: `approve_config` compare-and-swap now runs under `proposals/.config.lock` like every other CAS surface, and `subagent_fuse` derives its engine→profile mapping from configuration (preferring the active profile) instead of a hard-coded three-key dict that raised a bare `KeyError` for `xai_claude_oauth`/`subscription_oauth` presets.
+- Added `bench/repin.py` to intentionally regenerate the fail-closed artifact pins after deliberate plugin-tree edits, and `scripts/braintrust_export.py` (stdlib-only) exporting jobs, per-seat ledger calls, and workflow gate records as Braintrust project-log events — local JSONL by default, `--upload` via the REST API with `BRAINTRUST_API_KEY`. Job events score on the engine gate receipt and preserve the historical recorded verdict in metadata.
+- Full suite for this edition now reports 351 passed, 1 skipped, 425 subtests.
+
 ## Claude Fusion Drive 0.1.0 (Claude Code edition) - 2026-07-31
 
 - Ported the host contract from Codex to Claude Code: the `claude_host` execution owner, `claude_code.TaskCreate` goal receipts (legacy `create_goal` lifecycle files remain readable), `.claude-plugin/plugin.json` packaging with the repo-root `.claude-plugin/marketplace.json` marketplace file, and `${CLAUDE_PLUGIN_ROOT}/mcp_server.py` MCP wiring.
