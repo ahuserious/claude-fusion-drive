@@ -9,7 +9,7 @@
     "mcp_tool_timeout_seconds": 1800
   },
   "artifacts": {
-    "plugin_tree_sha256": "cd6a792d9fc72d3fd2406f5f3ca1015ec80cc3550b7196d801aa019b5e4bf091",
+    "plugin_tree_sha256": "96178064d5fc429fd613d6b179018d31ac676c2d2e97ee50bed52040ec9fb5fc",
     "runner_sha256": "1805de7a3b1c5615cccb901065f23f329768838895123767e21b631b971abd2d",
     "validator_sha256": "a4bd11f324f09758eea38127c003dc48e97136db463844b72c69c0809e015607",
     "benchmark_runtime_tree_sha256": "c3a6b47a2e795483a78712d950ae71310ae3ee8ae2b12f2b0c2692a643a610da"

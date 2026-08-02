@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (0.1.1)
+## Claude Fusion Drive 0.1.1 (Claude Code edition) - 2026-08-02
 
 - Fixed the approval-gate verdict nesting bug: `FusionDriveEngine.approval_gate` read `verdict`/`passed` off the orchestrator's wrapper dict instead of the nested gate result, so every gate auto-recorded FAIL — including 2/2 PASS receipts — and live workflows required manual `lifecycle_gate_record` transcription. Verdicts now derive from the inner gate dict (`PASS`, `NEEDS_WORK` when all negative reviewer verdicts are NEEDS_WORK with no deterministic blocks, otherwise `FAIL`). Added `tests/test_engine_gate_contract.py` running `approval_gate` through the real `FusionOrchestrator`, and corrected the engine test fake to the real wrapper shape.
 - Cost governance: `_legacy_seat` no longer copies a template's per-model pricing table onto a seat retargeted to a different model (honest unknown instead of billing at the template model's rates), and `approval_threshold_usd` is now enforced by `BudgetTracker` — a deduplicated ledger warning under `hard_stop`/`warn_only`, a `BudgetExceeded` requiring host approval under `approval_then_hard_stop`. OpenRouter usage-cost accounting needs no request opt-in: the current API always returns `usage.cost`, which the response parser already consumes.
