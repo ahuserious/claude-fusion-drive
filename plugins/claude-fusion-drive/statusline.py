@@ -3,8 +3,9 @@
 
 TUI-styled single line. Models render as color-family chips: Grok white-on-
 black, Anthropic orange-on-gray, OpenAI and everything else black-on-white;
-effective reasoning rides each chip as a colored mini-bar (▂▄▆█). Also shown:
-profile badge, provider status dots, mini-fuse state, orchestration toggles
+effective reasoning follows each chip as a colored superscript (ˡ ᵐ ʰ ˣ ᴹ).
+Also shown: profile badge, dim-label/bright-value pairs for providers,
+mini-fuse, and orchestration toggles
 (fusion-plan, fusion preset, subagent review — stored in
 <state>/statusline.json "toggles"), live fusion process status, Braintrust
 link, hotkey slot legend (active slot in reverse video), and a hotkey
@@ -50,7 +51,7 @@ DIM_C, LABEL_C, SEP_C = 240, 250, 237
 GOOD_C, BAD_C, WARN_C = 77, 196, 220
 BADGE_BG, BADGE_FG = 24, 195
 WF_C, RUN_C = 111, 220
-SEP = f"\033[38;5;{SEP_C}m│{RESET}"
+SEP = f" \033[38;5;{SEP_C}m│{RESET} "
 
 # Model family chips: (bg, fg)
 CHIP_GROK = (16, 231)      # black highlight, white text
@@ -146,20 +147,25 @@ def seat_chip(config: dict, seat_name: str) -> str:
 def topology_segment(config: dict) -> str:
     profile = config["profiles"][config["active_profile"]]
     engine = config["engines"][profile["engine"]]
-    arrow = fg(DIM_C, "→")
+    dot = fg(SEP_C, "·")
+
+    def role(label: str, value: str) -> str:
+        return f"{fg(DIM_C, label)} {value}"
+
     if engine.get("kind") == "server_managed":
-        models = fg(DIM_C, "+").join(model_chip(m) for m in engine.get("analysis_models", []))
-        return f"{models}{arrow}{model_chip(str(engine.get('judge_model', '?')))}{fg(DIM_C, '·srv')}"
+        models = " ".join(model_chip(m) for m in engine.get("analysis_models", []))
+        judge = model_chip(str(engine.get("judge_model", "?")))
+        return f"{role('panel', models)} {dot} {role('judge+fuse', judge)}{fg(DIM_C, '·srv')}"
     counts: dict[str, int] = {}
     for seat_name in engine.get("panel", []):
         label = seat_chip(config, seat_name)
         counts[label] = counts.get(label, 0) + 1
-    panel = fg(DIM_C, "+").join(
+    panel = " ".join(
         label if n == 1 else f"{label}{fg(DIM_C, f'×{n}')}" for label, n in counts.items()
     )
     judge = seat_chip(config, str(engine.get("judge", "")))
     fuser = seat_chip(config, str(engine.get("fuser", "")))
-    return f"{panel}{arrow}{judge}{arrow}{fuser}"
+    return f"{role('panel', panel)} {dot} {role('judge', judge)} {dot} {role('fuse', fuser)}"
 
 
 def provider_signed_in(provider: dict) -> bool:
@@ -183,21 +189,22 @@ def provider_states(config: dict) -> list[tuple[str, bool]]:
 
 def providers_segment(states: list[tuple[str, bool]], collapsed: bool) -> str:
     if collapsed and all(ok for _, ok in states):
-        return f"{fg(LABEL_C, 'prov')}{fg(GOOD_C, '●')}"
+        return f"{fg(GOOD_C, '✓')}{fg(LABEL_C, 'providers')}"
     return " ".join(
-        f"{fg(LABEL_C, name)}{fg(GOOD_C if ok else BAD_C, '●' if ok else '○')}"
+        f"{fg(GOOD_C if ok else BAD_C, '✓' if ok else '✗')}{fg(LABEL_C, name)}"
         for name, ok in states
     )
 
 
 def mini_fuse_segment(config: dict) -> str:
     seats = config.get("seats", {})
+    label = fg(DIM_C, "mini")
     if not all(name in seats for name in MINI_FUSE_SEATS):
-        return fg(DIM_C, "MF·n/a")
+        return f"{label}{fg(DIM_C, '–')}"
     if all(seats[name].get("enabled") for name in MINI_FUSE_SEATS):
         model = str(seats[MINI_FUSE_SEATS[0]].get("model", "?"))
-        return f"{fg(LABEL_C, 'MF')}{fg(GOOD_C, '●')}{model_chip(model)}"
-    return f"{fg(LABEL_C, 'MF')}{fg(DIM_C, '○off')}"
+        return f"{label}{fg(GOOD_C, '✓')}{model_chip(model)}"
+    return f"{label}{fg(BAD_C, '✗')}"
 
 
 def toggles(sl_config: dict) -> dict:
@@ -208,16 +215,16 @@ def toggles(sl_config: dict) -> dict:
     return merged
 
 
-def toggles_segment(sl_config: dict) -> str:
+def toggles_segment(config: dict, sl_config: dict) -> str:
     state = toggles(sl_config)
     plan_on = bool(state.get("fusion_plan"))
     review_on = bool(state.get("subagent_review"))
     preset = str(state.get("preset", "high"))
-    sup, sup_color = EFFORT_STYLE.get(preset, ("?", DIM_C))
-    plan = f"{fg(LABEL_C, 'plan')}{fg(GOOD_C if plan_on else BAD_C, '●' if plan_on else '○')}"
-    pset = f"{fg(LABEL_C, 'pset')}{fg(sup_color, sup)}"
-    review = f"{fg(LABEL_C, 'rev')}{fg(GOOD_C if review_on else BAD_C, '●' if review_on else '○')}"
-    return f"{plan} {pset} {review}"
+    _, preset_color = EFFORT_STYLE.get(preset, ("?", DIM_C))
+    mark = lambda on: fg(GOOD_C if on else BAD_C, "✓" if on else "✗")
+    plan = f"{fg(DIM_C, 'plan')}{mark(plan_on)}{fg(SEP_C, '·')}{fg(preset_color, preset)}"
+    review = f"{fg(DIM_C, 'review')}{mark(review_on)}"
+    return f"{mini_fuse_segment(config)} {plan} {review}"
 
 
 def live_segment(state_root: Path) -> str:
@@ -249,21 +256,21 @@ def live_segment(state_root: Path) -> str:
     parts = []
     if active_jobs:
         jobs = "+".join(f"{op}×{n}" if n > 1 else op for op, n in sorted(active_jobs.items()))
-        parts.append(fg(RUN_C, f"▶{jobs}"))
+        parts.append(fg(RUN_C, f"▶ {jobs}"))
     if workflow_states:
         states = "+".join(f"{s}×{n}" if n > 1 else s for s, n in sorted(workflow_states.items()))
-        parts.append(f"{fg(DIM_C, '◔')}{fg(WF_C, states)}")
-    return " ".join(parts) if parts else fg(DIM_C, "· idle")
+        parts.append(f"{fg(DIM_C, '⧗')} {fg(WF_C, states)}")
+    return " ".join(parts) if parts else fg(DIM_C, "idle")
 
 
 def braintrust_segment(state_root: Path) -> str:
-    label = fg(LABEL_C, "BT")
+    label = fg(DIM_C, "BT")
     if os.environ.get("BRAINTRUST_API_KEY"):
-        return f"{label}{fg(GOOD_C, '●')}"
+        return f"{label}{fg(GOOD_C, '✓')}"
     export_dir = state_root / "braintrust-export"
     if export_dir.is_dir() and any(export_dir.iterdir()):
-        return f"{label}{fg(WARN_C, '◐')}"
-    return f"{label}{fg(BAD_C, '○')}"
+        return f"{label}{fg(WARN_C, '~')}"
+    return f"{label}{fg(BAD_C, '✗')}"
 
 
 def read_statusline_config(state_root: Path) -> dict:
@@ -329,8 +336,7 @@ def main() -> int:
                 chip(BADGE_BG, BADGE_FG, f" ⚛ {profile_name} "),
                 topology_segment(config),
                 providers_segment(states, collapse_providers),
-                mini_fuse_segment(config),
-                toggles_segment(sl_config),
+                toggles_segment(config, sl_config),
                 live_segment(state_root),
                 braintrust_segment(state_root),
             ]
