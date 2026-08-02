@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Claude Code statusline for Claude Fusion Drive.
 
-Renders one compact line: active profile, fusion topology (panel/judge/fuser
-with effective reasoning as superscripts), provider sign-in state, mini-fuse
-on/off, live fusion process status, Braintrust link state, and the hotkey
-slot legend. Width-aware: segments degrade in priority order to fit the
-budget (``width`` in <state>/statusline.json, else $COLUMNS, else 120) so the
-host never hard-truncates the tail. Must never crash — on any error it
-degrades to a minimal line.
+TUI-styled single line: profile badge, fusion pipeline (panel → judge →
+fuser, models colored per family, effective reasoning as colored mini-bars
+▂▄▆█), provider status dots, mini-fuse state, live fusion process status,
+Braintrust link, and the hotkey slot legend (active slot in reverse video).
+Width-aware: segments degrade in priority order to fit the budget (``width``
+in <state>/statusline.json, else $COLUMNS, else 120) so the host never
+hard-truncates the tail. Must never crash — on any error it degrades to a
+minimal line.
 """
 
 from __future__ import annotations
@@ -23,19 +24,38 @@ from pathlib import Path
 PLUGIN_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PLUGIN_ROOT))
 
-DIM, RESET = "\033[2m", "\033[0m"
-GREEN, RED, YELLOW, CYAN = "\033[32m", "\033[31m", "\033[33m", "\033[36m"
-SEP = f"{DIM}│{RESET}"
+RESET = "\033[0m"
 ANSI_PATTERN = re.compile(r"\033\[[0-9;]*m")
 TERMINAL_JOB_STATUSES = {"completed", "failed", "aborted"}
 STALE_WORKFLOW_SECONDS = 7 * 24 * 3600
 DEFAULT_WIDTH = 120
 
-MODEL_SHORT = {
-    "claude-fable-5": "fable5",
-    "grok-4.5": "grok45",
-    "gpt-5.6-sol": "sol",
-    "openrouter/fusion": "fusion",
+
+def fg(color: int, text: str) -> str:
+    return f"\033[38;5;{color}m{text}{RESET}"
+
+
+def badge(bg_color: int, fg_color: int, text: str) -> str:
+    return f"\033[48;5;{bg_color}m\033[38;5;{fg_color}m {text} {RESET}"
+
+
+def reverse(text: str) -> str:
+    return f"\033[7m{text}\033[27m"
+
+
+# Palette
+DIM_C, LABEL_C, SEP_C = 240, 250, 237
+GOOD_C, BAD_C, WARN_C = 77, 196, 220
+BADGE_BG, BADGE_FG = 24, 195
+GROK_C, FABLE_C, SOL_C, FUSION_C, MODEL_C = 214, 141, 75, 205, 250
+WF_C, RUN_C = 111, 220
+SEP = f" \033[38;5;{SEP_C}m│{RESET} "
+
+MODEL_STYLE = {
+    "claude-fable-5": ("fable5", FABLE_C),
+    "grok-4.5": ("grok45", GROK_C),
+    "gpt-5.6-sol": ("sol", SOL_C),
+    "openrouter/fusion": ("fusion", FUSION_C),
 }
 PROVIDER_SHORT = {
     "xai_api": "xai",
@@ -46,9 +66,11 @@ PROVIDER_SHORT = {
     "grok_oauth": "grok",
     "claude_oauth": "claude",
 }
-EFFORT_SUP = {
-    "none": "°", "minimal": "ⁱ", "low": "ˡ", "medium": "ᵐ",
-    "high": "ʰ", "xhigh": "ˣ", "max": "ᴹ", "ultra": "ᵁ",
+# Effective reasoning → (mini-bar glyph, color): low/green climbs to max/magenta.
+EFFORT_STYLE = {
+    "none": ("▁", DIM_C), "minimal": ("▁", 108), "low": ("▂", 77),
+    "medium": ("▄", 148), "high": ("▆", 220), "xhigh": ("▇", 208),
+    "max": ("█", 199), "ultra": ("█", 201),
 }
 STATE_SHORT = {
     "awaiting_plan_gate": "plan-gate",
@@ -70,9 +92,11 @@ def visible_length(text: str) -> int:
     return len(ANSI_PATTERN.sub("", text))
 
 
-def short_model(model: str) -> str:
-    model = model.split("/")[-1] if "/" in model else model
-    return MODEL_SHORT.get(model, model.replace("claude-", "").replace("-", ""))
+def model_style(model: str) -> tuple[str, int]:
+    key = model if model in MODEL_STYLE else model.split("/")[-1]
+    if key in MODEL_STYLE:
+        return MODEL_STYLE[key]
+    return key.replace("claude-", "").replace("-", ""), MODEL_C
 
 
 def short_profile(name: str) -> str:
@@ -86,25 +110,31 @@ def short_profile(name: str) -> str:
 
 def seat_label(config: dict, seat_name: str) -> str:
     seat = config.get("seats", {}).get(seat_name, {})
-    effort = str(seat.get("effective_reasoning", "?"))
-    return f"{short_model(str(seat.get('model', '?')))}{EFFORT_SUP.get(effort, '?')}"
+    name, color = model_style(str(seat.get("model", "?")))
+    bar, bar_color = EFFORT_STYLE.get(str(seat.get("effective_reasoning", "")), ("?", DIM_C))
+    return f"{fg(color, name)}{fg(bar_color, bar)}"
 
 
 def topology_segment(config: dict) -> str:
     profile = config["profiles"][config["active_profile"]]
     engine = config["engines"][profile["engine"]]
+    arrow = fg(DIM_C, "→")
     if engine.get("kind") == "server_managed":
-        models = "+".join(short_model(m) for m in engine.get("analysis_models", []))
-        judge = short_model(str(engine.get("judge_model", "?")))
-        return f"P:{models} JF:{judge}{DIM}·srv{RESET}"
+        models = fg(DIM_C, "+").join(
+            fg(model_style(m)[1], model_style(m)[0]) for m in engine.get("analysis_models", [])
+        )
+        judge_name, judge_color = model_style(str(engine.get("judge_model", "?")))
+        return f"{models}{arrow}{fg(judge_color, judge_name)}{fg(DIM_C, '·srv')}"
     counts: dict[str, int] = {}
     for seat_name in engine.get("panel", []):
         label = seat_label(config, seat_name)
         counts[label] = counts.get(label, 0) + 1
-    panel = "+".join(label if n == 1 else f"{label}×{n}" for label, n in counts.items())
+    panel = fg(DIM_C, "+").join(
+        label if n == 1 else f"{label}{fg(DIM_C, f'×{n}')}" for label, n in counts.items()
+    )
     judge = seat_label(config, str(engine.get("judge", "")))
     fuser = seat_label(config, str(engine.get("fuser", "")))
-    return f"P:{panel} J:{judge} F:{fuser}"
+    return f"{panel}{arrow}{judge}{arrow}{fuser}"
 
 
 def provider_signed_in(provider: dict) -> bool:
@@ -128,20 +158,21 @@ def provider_states(config: dict) -> list[tuple[str, bool]]:
 
 def providers_segment(states: list[tuple[str, bool]], collapsed: bool) -> str:
     if collapsed and all(ok for _, ok in states):
-        return f"prov{GREEN}✓{RESET}"
-    return "".join(
-        f"{name}{(GREEN if ok else RED)}{'✓' if ok else '✗'}{RESET}" for name, ok in states
+        return f"{fg(LABEL_C, 'prov')}{fg(GOOD_C, '●')}"
+    return " ".join(
+        f"{fg(LABEL_C, name)}{fg(GOOD_C if ok else BAD_C, '●' if ok else '○')}"
+        for name, ok in states
     )
 
 
 def mini_fuse_segment(config: dict) -> str:
     seats = config.get("seats", {})
     if not all(name in seats for name in MINI_FUSE_SEATS):
-        return f"{DIM}MF·n/a{RESET}"
+        return fg(DIM_C, "MF·n/a")
     if all(seats[name].get("enabled") for name in MINI_FUSE_SEATS):
-        model = short_model(str(seats[MINI_FUSE_SEATS[0]].get("model", "?")))
-        return f"MF{GREEN}✓{RESET}{model}"
-    return f"MF{DIM}·off{RESET}"
+        name, color = model_style(str(seats[MINI_FUSE_SEATS[0]].get("model", "?")))
+        return f"{fg(LABEL_C, 'MF')}{fg(GOOD_C, '●')}{fg(color, name)}"
+    return f"{fg(LABEL_C, 'MF')}{fg(DIM_C, '○off')}"
 
 
 def live_segment(state_root: Path) -> str:
@@ -173,20 +204,21 @@ def live_segment(state_root: Path) -> str:
     parts = []
     if active_jobs:
         jobs = "+".join(f"{op}×{n}" if n > 1 else op for op, n in sorted(active_jobs.items()))
-        parts.append(f"{YELLOW}▶{jobs}{RESET}")
+        parts.append(fg(RUN_C, f"▶{jobs}"))
     if workflow_states:
         states = "+".join(f"{s}×{n}" if n > 1 else s for s, n in sorted(workflow_states.items()))
-        parts.append(f"wf:{states}")
-    return " ".join(parts) if parts else f"{DIM}idle{RESET}"
+        parts.append(f"{fg(DIM_C, '◔')}{fg(WF_C, states)}")
+    return " ".join(parts) if parts else fg(DIM_C, "· idle")
 
 
 def braintrust_segment(state_root: Path) -> str:
+    label = fg(LABEL_C, "BT")
     if os.environ.get("BRAINTRUST_API_KEY"):
-        return f"BT{GREEN}✓{RESET}"
+        return f"{label}{fg(GOOD_C, '●')}"
     export_dir = state_root / "braintrust-export"
     if export_dir.is_dir() and any(export_dir.iterdir()):
-        return f"BT{YELLOW}~{RESET}"
-    return f"BT{RED}✗{RESET}"
+        return f"{label}{fg(WARN_C, '◐')}"
+    return f"{label}{fg(BAD_C, '○')}"
 
 
 def read_statusline_config(state_root: Path) -> dict:
@@ -208,10 +240,10 @@ def slots_segment(sl_config: dict, config: dict) -> str:
         label = short_profile(slots[slot])
         sup = SUPERSCRIPT.get(slot, slot)
         if slots[slot] == active:
-            parts.append(f"{CYAN}{sup}{label}{RESET}")
+            parts.append(fg(BADGE_FG, reverse(f"{sup}{label}")))
         else:
-            parts.append(f"{DIM}{sup}{RESET}{label}")
-    return "".join(parts)
+            parts.append(f"{fg(DIM_C, sup)}{fg(LABEL_C, label)}")
+    return " ".join(parts)
 
 
 def width_budget(sl_config: dict) -> int:
@@ -245,7 +277,7 @@ def main() -> int:
             if not full_profile:
                 profile_name = short_profile(profile_name)
             segments = [
-                f"{CYAN}⚛ {profile_name}{RESET}",
+                badge(BADGE_BG, BADGE_FG, f"⚛ {profile_name}"),
                 topology_segment(config),
                 providers_segment(states, collapse_providers),
                 mini_fuse_segment(config),
@@ -269,7 +301,7 @@ def main() -> int:
                 break
         print(line)
     except Exception as error:  # statusline must never crash the host UI
-        print(f"⚛ fusion-drive {DIM}(statusline error: {type(error).__name__}){RESET}")
+        print(f"⚛ fusion-drive \033[38;5;240m(statusline error: {type(error).__name__}){RESET}")
     return 0
 
 
