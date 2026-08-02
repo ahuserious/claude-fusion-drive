@@ -5,6 +5,11 @@ Subcommands:
   profile <name-or-slot>   Switch active_profile (validated propose+approve).
   mini-fuse on|off|status  Toggle the light-duty mini-fuse seats for subagent
                            and adversarial-review summarization.
+  plan on|off              Fusion-plan toggle: planning runs use full fusion
+                           at the configured preset level.
+  preset low|medium|high   Fusion preset intensity (default high).
+  review on|off            Subagent review: completed subagents and dynamic-
+                           workflow agents get a Grok 4.5 xhigh review pass.
   slots [set <n> <profile>]  Show or edit the statusline hotkey slots.
   status                   One-line summary (same data the statusline shows).
 
@@ -54,10 +59,61 @@ def load_slots() -> dict[str, str]:
     return dict(DEFAULT_SLOTS)
 
 
-def save_slots(slots: dict[str, str]) -> None:
+def load_statusline_config() -> dict:
+    try:
+        data = json.loads(slots_path().read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def save_statusline_config(data: dict) -> None:
     slots_path().write_text(
-        json.dumps({"slots": slots}, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+
+
+def save_slots(slots: dict[str, str]) -> None:
+    data = load_statusline_config()
+    data["slots"] = slots
+    save_statusline_config(data)
+
+
+DEFAULT_TOGGLES = {"fusion_plan": True, "preset": "high", "subagent_review": True}
+
+
+def load_toggles() -> dict:
+    merged = dict(DEFAULT_TOGGLES)
+    stored = load_statusline_config().get("toggles")
+    if isinstance(stored, dict):
+        merged.update(stored)
+    return merged
+
+
+def save_toggle(key: str, value) -> None:
+    data = load_statusline_config()
+    stored = data.get("toggles") if isinstance(data.get("toggles"), dict) else {}
+    stored[key] = value
+    data["toggles"] = stored
+    save_statusline_config(data)
+
+
+def cmd_toggle(key: str, label: str, action: str) -> int:
+    if action not in {"on", "off"}:
+        print(f"usage: fusion_ctl.py {label} on|off")
+        return 1
+    save_toggle(key, action == "on")
+    print(f"{label} → {action}")
+    return 0
+
+
+def cmd_preset(level: str) -> int:
+    if level not in {"low", "medium", "high"}:
+        print("usage: fusion_ctl.py preset low|medium|high")
+        return 1
+    save_toggle("preset", level)
+    print(f"preset → {level}")
+    return 0
 
 
 def apply_change(changes: dict, rationale: str) -> None:
@@ -126,6 +182,10 @@ def cmd_status() -> int:
     print(f"profile: {config['active_profile']}")
     print(f"panel: {engine.get('panel')}  judge: {engine.get('judge')}  fuser: {engine.get('fuser')}")
     print("mini-fuse:", "on" if mini_fuse_enabled(config) else "off")
+    state = load_toggles()
+    print(f"fusion-plan: {'on' if state.get('fusion_plan') else 'off'}  "
+          f"preset: {state.get('preset', 'high')}  "
+          f"subagent-review: {'on' if state.get('subagent_review') else 'off'}")
     return 0
 
 
@@ -139,6 +199,12 @@ def main() -> int:
         return cmd_profile(rest[0])
     if command == "mini-fuse" and len(rest) == 1:
         return cmd_mini_fuse(rest[0])
+    if command == "plan" and len(rest) == 1:
+        return cmd_toggle("fusion_plan", "plan", rest[0])
+    if command == "preset" and len(rest) == 1:
+        return cmd_preset(rest[0])
+    if command == "review" and len(rest) == 1:
+        return cmd_toggle("subagent_review", "review", rest[0])
     if command == "slots":
         return cmd_slots(rest)
     if command == "status":

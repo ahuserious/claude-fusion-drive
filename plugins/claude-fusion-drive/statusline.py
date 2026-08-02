@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Claude Code statusline for Claude Fusion Drive.
 
-TUI-styled single line: profile badge, fusion pipeline (panel → judge →
-fuser, models colored per family, effective reasoning as colored mini-bars
-▂▄▆█), provider status dots, mini-fuse state, live fusion process status,
-Braintrust link, and the hotkey slot legend (active slot in reverse video).
-Width-aware: segments degrade in priority order to fit the budget (``width``
-in <state>/statusline.json, else $COLUMNS, else 120) so the host never
-hard-truncates the tail. Must never crash — on any error it degrades to a
-minimal line.
+TUI-styled single line. Models render as color-family chips: Grok white-on-
+black, Anthropic orange-on-gray, OpenAI and everything else black-on-white;
+effective reasoning rides each chip as a colored mini-bar (▂▄▆█). Also shown:
+profile badge, provider status dots, mini-fuse state, orchestration toggles
+(fusion-plan, fusion preset, subagent review — stored in
+<state>/statusline.json "toggles"), live fusion process status, Braintrust
+link, hotkey slot legend (active slot in reverse video), and a hotkey
+reminder. Width-aware: segments degrade in priority order to fit the budget
+(``width`` in statusline.json, else $COLUMNS, else 120). Must never crash —
+on any error it degrades to a minimal line.
 """
 
 from __future__ import annotations
@@ -35,8 +37,8 @@ def fg(color: int, text: str) -> str:
     return f"\033[38;5;{color}m{text}{RESET}"
 
 
-def badge(bg_color: int, fg_color: int, text: str) -> str:
-    return f"\033[48;5;{bg_color}m\033[38;5;{fg_color}m {text} {RESET}"
+def chip(bg_color: int, fg_color: int, text: str) -> str:
+    return f"\033[48;5;{bg_color}m\033[38;5;{fg_color}m{text}{RESET}"
 
 
 def reverse(text: str) -> str:
@@ -47,16 +49,23 @@ def reverse(text: str) -> str:
 DIM_C, LABEL_C, SEP_C = 240, 250, 237
 GOOD_C, BAD_C, WARN_C = 77, 196, 220
 BADGE_BG, BADGE_FG = 24, 195
-GROK_C, FABLE_C, SOL_C, FUSION_C, MODEL_C = 214, 141, 75, 205, 250
 WF_C, RUN_C = 111, 220
-SEP = f" \033[38;5;{SEP_C}m│{RESET} "
+SEP = f"\033[38;5;{SEP_C}m│{RESET}"
 
-MODEL_STYLE = {
-    "claude-fable-5": ("fable5", FABLE_C),
-    "grok-4.5": ("grok45", GROK_C),
-    "gpt-5.6-sol": ("sol", SOL_C),
-    "openrouter/fusion": ("fusion", FUSION_C),
+# Model family chips: (bg, fg)
+CHIP_GROK = (16, 231)      # black highlight, white text
+CHIP_ANTHROPIC = (238, 208)  # gray highlight, orange text
+CHIP_OPENAI = (231, 16)    # white highlight, black text
+CHIP_OTHER = (231, 16)     # white highlight, black text
+
+MODEL_SHORT = {
+    "claude-fable-5": "fable5",
+    "grok-4.5": "grok45",
+    "gpt-5.6-sol": "sol",
+    "openrouter/fusion": "fusion",
 }
+ANTHROPIC_MARKERS = ("claude", "fable", "opus", "sonnet", "haiku", "mythos")
+OPENAI_MARKERS = ("gpt", "sol", "openai", "codex")
 PROVIDER_SHORT = {
     "xai_api": "xai",
     "openrouter_api": "or",
@@ -66,7 +75,7 @@ PROVIDER_SHORT = {
     "grok_oauth": "grok",
     "claude_oauth": "claude",
 }
-# Effective reasoning → (mini-bar glyph, color): low/green climbs to max/magenta.
+# Effort / preset level → (mini-bar glyph, color)
 EFFORT_STYLE = {
     "none": ("▁", DIM_C), "minimal": ("▁", 108), "low": ("▂", 77),
     "medium": ("▄", 148), "high": ("▆", 220), "xhigh": ("▇", 208),
@@ -86,17 +95,39 @@ STATE_SHORT = {
 SUPERSCRIPT = {"1": "¹", "2": "²", "3": "³", "4": "⁴",
                "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹"}
 MINI_FUSE_SEATS = ("grok45-mini-panel", "grok45-mini-judge", "grok45-mini-fuser")
+DEFAULT_TOGGLES = {"fusion_plan": True, "preset": "high", "subagent_review": True}
 
 
 def visible_length(text: str) -> int:
     return len(ANSI_PATTERN.sub("", text))
 
 
-def model_style(model: str) -> tuple[str, int]:
-    key = model if model in MODEL_STYLE else model.split("/")[-1]
-    if key in MODEL_STYLE:
-        return MODEL_STYLE[key]
-    return key.replace("claude-", "").replace("-", ""), MODEL_C
+def model_chip_colors(model: str) -> tuple[int, int]:
+    lowered = model.lower()
+    if "grok" in lowered:
+        return CHIP_GROK
+    if any(marker in lowered for marker in ANTHROPIC_MARKERS):
+        return CHIP_ANTHROPIC
+    if any(marker in lowered for marker in OPENAI_MARKERS):
+        return CHIP_OPENAI
+    return CHIP_OTHER
+
+
+def short_model(model: str) -> str:
+    key = model if model in MODEL_SHORT else model.split("/")[-1]
+    return MODEL_SHORT.get(key, key.replace("claude-", "").replace("-", ""))
+
+
+def model_chip(model: str, effort: str | None = None) -> str:
+    bg_color, fg_color = model_chip_colors(model)
+    name = short_model(model)
+    if effort is None:
+        return chip(bg_color, fg_color, name)
+    bar, bar_color = EFFORT_STYLE.get(effort, ("?", DIM_C))
+    return (
+        f"\033[48;5;{bg_color}m\033[38;5;{fg_color}m{name}"
+        f"\033[38;5;{bar_color}m{bar}{RESET}"
+    )
 
 
 def short_profile(name: str) -> str:
@@ -108,11 +139,9 @@ def short_profile(name: str) -> str:
     return known.get(name, name.split("-")[0][:5])
 
 
-def seat_label(config: dict, seat_name: str) -> str:
+def seat_chip(config: dict, seat_name: str) -> str:
     seat = config.get("seats", {}).get(seat_name, {})
-    name, color = model_style(str(seat.get("model", "?")))
-    bar, bar_color = EFFORT_STYLE.get(str(seat.get("effective_reasoning", "")), ("?", DIM_C))
-    return f"{fg(color, name)}{fg(bar_color, bar)}"
+    return model_chip(str(seat.get("model", "?")), str(seat.get("effective_reasoning", "")))
 
 
 def topology_segment(config: dict) -> str:
@@ -120,20 +149,17 @@ def topology_segment(config: dict) -> str:
     engine = config["engines"][profile["engine"]]
     arrow = fg(DIM_C, "→")
     if engine.get("kind") == "server_managed":
-        models = fg(DIM_C, "+").join(
-            fg(model_style(m)[1], model_style(m)[0]) for m in engine.get("analysis_models", [])
-        )
-        judge_name, judge_color = model_style(str(engine.get("judge_model", "?")))
-        return f"{models}{arrow}{fg(judge_color, judge_name)}{fg(DIM_C, '·srv')}"
+        models = fg(DIM_C, "+").join(model_chip(m) for m in engine.get("analysis_models", []))
+        return f"{models}{arrow}{model_chip(str(engine.get('judge_model', '?')))}{fg(DIM_C, '·srv')}"
     counts: dict[str, int] = {}
     for seat_name in engine.get("panel", []):
-        label = seat_label(config, seat_name)
+        label = seat_chip(config, seat_name)
         counts[label] = counts.get(label, 0) + 1
     panel = fg(DIM_C, "+").join(
         label if n == 1 else f"{label}{fg(DIM_C, f'×{n}')}" for label, n in counts.items()
     )
-    judge = seat_label(config, str(engine.get("judge", "")))
-    fuser = seat_label(config, str(engine.get("fuser", "")))
+    judge = seat_chip(config, str(engine.get("judge", "")))
+    fuser = seat_chip(config, str(engine.get("fuser", "")))
     return f"{panel}{arrow}{judge}{arrow}{fuser}"
 
 
@@ -170,9 +196,29 @@ def mini_fuse_segment(config: dict) -> str:
     if not all(name in seats for name in MINI_FUSE_SEATS):
         return fg(DIM_C, "MF·n/a")
     if all(seats[name].get("enabled") for name in MINI_FUSE_SEATS):
-        name, color = model_style(str(seats[MINI_FUSE_SEATS[0]].get("model", "?")))
-        return f"{fg(LABEL_C, 'MF')}{fg(GOOD_C, '●')}{fg(color, name)}"
+        model = str(seats[MINI_FUSE_SEATS[0]].get("model", "?"))
+        return f"{fg(LABEL_C, 'MF')}{fg(GOOD_C, '●')}{model_chip(model)}"
     return f"{fg(LABEL_C, 'MF')}{fg(DIM_C, '○off')}"
+
+
+def toggles(sl_config: dict) -> dict:
+    merged = dict(DEFAULT_TOGGLES)
+    stored = sl_config.get("toggles")
+    if isinstance(stored, dict):
+        merged.update(stored)
+    return merged
+
+
+def toggles_segment(sl_config: dict) -> str:
+    state = toggles(sl_config)
+    plan_on = bool(state.get("fusion_plan"))
+    review_on = bool(state.get("subagent_review"))
+    preset = str(state.get("preset", "high"))
+    bar, bar_color = EFFORT_STYLE.get(preset, ("?", DIM_C))
+    plan = f"{fg(LABEL_C, 'plan')}{fg(GOOD_C if plan_on else BAD_C, '●' if plan_on else '○')}"
+    pset = f"{fg(LABEL_C, 'pset')}{fg(bar_color, bar)}"
+    review = f"{fg(LABEL_C, 'rev')}{fg(GOOD_C if review_on else BAD_C, '●' if review_on else '○')}"
+    return f"{plan} {pset} {review}"
 
 
 def live_segment(state_root: Path) -> str:
@@ -246,6 +292,10 @@ def slots_segment(sl_config: dict, config: dict) -> str:
     return " ".join(parts)
 
 
+def keys_segment() -> str:
+    return fg(DIM_C, "⌨!fusion plan|pset|rev")
+
+
 def width_budget(sl_config: dict) -> int:
     configured = sl_config.get("width")
     if isinstance(configured, int) and configured > 40:
@@ -272,29 +322,33 @@ def main() -> int:
         sl_config = read_statusline_config(state_root)
         states = provider_states(config)
 
-        def build(*, slots: bool, collapse_providers: bool, full_profile: bool) -> str:
+        def build(*, keys: bool, slots: bool, collapse_providers: bool, full_profile: bool) -> str:
             profile_name = str(config.get("active_profile", "?"))
             if not full_profile:
                 profile_name = short_profile(profile_name)
             segments = [
-                badge(BADGE_BG, BADGE_FG, f"⚛ {profile_name}"),
+                chip(BADGE_BG, BADGE_FG, f" ⚛ {profile_name} "),
                 topology_segment(config),
                 providers_segment(states, collapse_providers),
                 mini_fuse_segment(config),
+                toggles_segment(sl_config),
                 live_segment(state_root),
                 braintrust_segment(state_root),
             ]
             if slots:
                 segments.append(slots_segment(sl_config, config))
+            if keys:
+                segments.append(keys_segment())
             return SEP.join(segment for segment in segments if segment)
 
         budget = width_budget(sl_config)
         # Degrade in priority order until the line fits the width budget.
         for attempt in (
-            {"slots": True, "collapse_providers": False, "full_profile": True},
-            {"slots": True, "collapse_providers": False, "full_profile": False},
-            {"slots": True, "collapse_providers": True, "full_profile": False},
-            {"slots": False, "collapse_providers": True, "full_profile": False},
+            {"keys": True, "slots": True, "collapse_providers": False, "full_profile": True},
+            {"keys": True, "slots": True, "collapse_providers": False, "full_profile": False},
+            {"keys": False, "slots": True, "collapse_providers": False, "full_profile": False},
+            {"keys": False, "slots": True, "collapse_providers": True, "full_profile": False},
+            {"keys": False, "slots": False, "collapse_providers": True, "full_profile": False},
         ):
             line = build(**attempt)
             if visible_length(line) <= budget:

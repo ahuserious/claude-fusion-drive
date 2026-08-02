@@ -154,3 +154,30 @@ merge is involved.
 - Switch profiles with `fusion_ctl.py profile <slot-or-name>` (shell alias
   `fusion profile 2`, or `!fusion profile 2` from the Claude Code prompt);
   configure slots with `fusion_ctl.py slots set <n> <profile>`.
+
+## Orchestration toggles (fusion-plan, preset, subagent review)
+
+Read the toggles from `<state>/statusline.json` (`"toggles"`; defaults:
+`fusion_plan` on, `preset` high, `subagent_review` on) or via
+`fusion_ctl.py status`. They are host-orchestration hints, shown on the
+statusline:
+
+- **fusion_plan on**: planning runs (fuse for a plan, plan-gate preparation)
+  use full fusion at the configured `preset` level — `high` maps planning to
+  the active profile's full engine at its configured reasoning; `medium`/
+  `low` permit a cheaper planning pass (e.g. reduced panel or the mini-fuse
+  engine for low-stakes plans). `fusion_plan` off means plan directly without
+  a fusion fan-out.
+- **preset low|medium|high** (default high): the intensity dial the
+  fusion-plan behavior and other discretionary fusion passes should honor.
+- **subagent_review on**: execution runs Grok 4.5 xhigh subagents with
+  xhigh subagent reviewers — every completed subagent result (including
+  agents inside dynamic Workflow runs the host composes) gets a review pass
+  before its output reaches the orchestrator: mini-fuse compression when the
+  MF seats are enabled, otherwise a single grok45-gate-style review. When
+  off, subagent results return directly with no review stage; do not
+  silently re-enable it.
+- Dynamic workflows: when composing Workflow scripts, apply the same
+  contract — insert review/verify stages for completed agents only when
+  `subagent_review` is on, and choose planning-stage fusion depth from
+  `fusion_plan` + `preset`.
