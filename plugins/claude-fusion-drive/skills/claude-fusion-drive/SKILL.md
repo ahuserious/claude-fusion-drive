@@ -128,3 +128,29 @@ merge is involved.
   concurrency one; this is not an API batch discount.
 - Concurrency and caching may improve throughput or cache billing but are not
   described as a guaranteed discount.
+
+## Mini-fuse for subagents and adversarial reviewers
+
+- The `mini-fuse` subagent preset (engine `mini_fuse`: one Grok 4.5 reviewer
+  panel seat, mini judge, mini fuser, all at low reasoning with small output
+  budgets) is a light-duty fusion pass for completed subagent work.
+- When the mini-fuse seats are enabled (`fusion_ctl.py mini-fuse status`), run
+  each completed subagent or adversarial-review result through
+  `subagent_fuse` with `preset: "mini-fuse"`; the fused output is a short,
+  evidence-grounded summary to hand back to the orchestrator in place of the
+  subagent's full transcript.
+- When the seats are disabled, skip the mini-fuse pass entirely and return
+  subagent results directly; never silently substitute a heavier engine.
+- Mini-fuse is spend-bounded by the `mini-fuse` profile budgets and must not
+  be used for primary planning or final synthesis — those stay on the active
+  profile's full engine.
+
+## Statusline and profile hotkeys
+
+- `statusline.py` (wired via Claude Code `statusLine`) shows: active profile,
+  panel/judge/fuser topology with effective reasoning, provider sign-in
+  state, mini-fuse on/off, live job/workflow status, Braintrust link state,
+  and numbered profile slots.
+- Switch profiles with `fusion_ctl.py profile <slot-or-name>` (shell alias
+  `fusion profile 2`, or `!fusion profile 2` from the Claude Code prompt);
+  configure slots with `fusion_ctl.py slots set <n> <profile>`.

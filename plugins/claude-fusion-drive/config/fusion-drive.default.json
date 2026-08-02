@@ -146,103 +146,33 @@
     }
   },
   "seats": {
-    "grok45-panel": {
+    "all-grok-fuser": {
       "enabled": true,
       "provider": "xai_api",
       "model": "grok-4.5",
-      "role": "panel",
-      "persona": "Independent evidence-first Grok researcher; preserve falsifiable minority findings.",
+      "role": "fuser",
+      "persona": "Grok generative fuser preserving supported dissent.",
       "reasoning": "xhigh",
       "effective_reasoning": "high",
-      "reasoning_max_tokens": null,
-      "max_output_tokens": 32768,
-      "timeout_seconds": 1200,
-      "tool_policy": "none",
-      "structured_output": "panel_report"
-    },
-    "gpt56sol-panel": {
-      "enabled": true,
-      "provider": "openrouter_api",
-      "model": "openai/gpt-5.6-sol",
-      "role": "panel",
-      "persona": "Independent systems and implementation planner; trace constraints and edge cases.",
-      "reasoning": "xhigh",
-      "effective_reasoning": "xhigh",
-      "reasoning_max_tokens": null,
-      "max_output_tokens": 32768,
-      "timeout_seconds": 1200,
-      "tool_policy": "none",
-      "structured_output": "panel_report"
-    },
-    "fable5-panel": {
-      "enabled": true,
-      "provider": "openrouter_api",
-      "model": "anthropic/claude-fable-5",
-      "role": "panel",
-      "persona": "Independent conceptual critic; produce an alternative plan and identify hidden assumptions.",
-      "reasoning": "xhigh",
-      "effective_reasoning": "xhigh",
-      "reasoning_max_tokens": null,
-      "max_output_tokens": 32768,
-      "timeout_seconds": 1200,
-      "tool_policy": "none",
-      "structured_output": "panel_report"
-    },
-    "gpt56sol-judge": {
-      "enabled": true,
-      "provider": "openrouter_api",
-      "model": "openai/gpt-5.6-sol",
-      "role": "judge",
-      "persona": "Anonymous comparative judge; diagnose contradictions without majority voting.",
-      "reasoning": "xhigh",
-      "effective_reasoning": "xhigh",
-      "reasoning_max_tokens": null,
-      "max_output_tokens": 24576,
-      "timeout_seconds": 1200,
-      "tool_policy": "none",
-      "structured_output": "judge_analysis"
-    },
-    "gpt56sol-fuser": {
-      "enabled": true,
-      "provider": "openrouter_api",
-      "model": "openai/gpt-5.6-sol",
-      "role": "fuser",
-      "persona": "Generative fuser; build a stronger answer from raw evidence and preserve supported dissent.",
-      "reasoning": "xhigh",
-      "effective_reasoning": "xhigh",
       "reasoning_max_tokens": null,
       "max_output_tokens": 49152,
       "timeout_seconds": 1200,
       "tool_policy": "none",
       "structured_output": "final_answer"
     },
-    "grok45-gate-primary": {
+    "all-grok-judge": {
       "enabled": true,
       "provider": "xai_api",
       "model": "grok-4.5",
-      "role": "verifier",
-      "persona": "Fail-closed approval reviewer; reject unsupported completion claims.",
+      "role": "judge",
+      "persona": "Anonymous Grok comparative judge.",
       "reasoning": "xhigh",
       "effective_reasoning": "high",
       "reasoning_max_tokens": null,
       "max_output_tokens": 24576,
       "timeout_seconds": 1200,
       "tool_policy": "none",
-      "structured_output": "gate_verdict"
-    },
-    "grok45-gate-secondary": {
-      "enabled": true,
-      "provider": "xai_api",
-      "model": "grok-4.5",
-      "role": "verifier",
-      "persona": "Independent adversarial gate reviewer; seek counterexamples and missing evidence.",
-      "reasoning": "xhigh",
-      "effective_reasoning": "high",
-      "reasoning_max_tokens": null,
-      "max_output_tokens": 24576,
-      "timeout_seconds": 1200,
-      "tool_policy": "none",
-      "structured_output": "gate_verdict"
+      "structured_output": "judge_analysis"
     },
     "all-grok-panel-a": {
       "enabled": true,
@@ -272,12 +202,194 @@
       "tool_policy": "none",
       "structured_output": "panel_report"
     },
-    "all-grok-judge": {
+    "fable5-oauth-fuser": {
+      "enabled": true,
+      "provider": "claude_oauth",
+      "model": "claude-fable-5",
+      "role": "fuser",
+      "persona": "Subscription-backed generative fuser; synthesize the strongest plan while preserving supported dissent.",
+      "reasoning": "xhigh",
+      "effective_reasoning": "max",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 49152,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "structured_output": "final_answer"
+    },
+    "fable5-oauth-panel": {
+      "enabled": true,
+      "provider": "claude_oauth",
+      "model": "claude-fable-5",
+      "role": "panel",
+      "persona": "Subscription-backed Fable panel seat in safe mode with tools disabled.",
+      "reasoning": "xhigh",
+      "effective_reasoning": "max",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 32768,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "structured_output": "panel_report"
+    },
+    "fable5-panel": {
+      "enabled": true,
+      "provider": "openrouter_api",
+      "model": "anthropic/claude-fable-5",
+      "role": "panel",
+      "persona": "Independent conceptual critic; produce an alternative plan and identify hidden assumptions.",
+      "reasoning": "xhigh",
+      "effective_reasoning": "xhigh",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 32768,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "structured_output": "panel_report"
+    },
+    "gpt56sol-fuser": {
+      "enabled": true,
+      "provider": "openrouter_api",
+      "model": "openai/gpt-5.6-sol",
+      "role": "fuser",
+      "persona": "Generative fuser; build a stronger answer from raw evidence and preserve supported dissent.",
+      "reasoning": "xhigh",
+      "effective_reasoning": "xhigh",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 49152,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "structured_output": "final_answer"
+    },
+    "gpt56sol-judge": {
+      "enabled": true,
+      "provider": "openrouter_api",
+      "model": "openai/gpt-5.6-sol",
+      "role": "judge",
+      "persona": "Anonymous comparative judge; diagnose contradictions without majority voting.",
+      "reasoning": "xhigh",
+      "effective_reasoning": "xhigh",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 24576,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "structured_output": "judge_analysis"
+    },
+    "gpt56sol-panel": {
+      "enabled": true,
+      "provider": "openrouter_api",
+      "model": "openai/gpt-5.6-sol",
+      "role": "panel",
+      "persona": "Independent systems and implementation planner; trace constraints and edge cases.",
+      "reasoning": "xhigh",
+      "effective_reasoning": "xhigh",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 32768,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "structured_output": "panel_report"
+    },
+    "grok45-gate-primary": {
+      "enabled": true,
+      "provider": "xai_api",
+      "model": "grok-4.5",
+      "role": "verifier",
+      "persona": "Fail-closed approval reviewer; reject unsupported completion claims.",
+      "reasoning": "xhigh",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 24576,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "structured_output": "gate_verdict"
+    },
+    "grok45-gate-secondary": {
+      "enabled": true,
+      "provider": "xai_api",
+      "model": "grok-4.5",
+      "role": "verifier",
+      "persona": "Independent adversarial gate reviewer; seek counterexamples and missing evidence.",
+      "reasoning": "xhigh",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 24576,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "structured_output": "gate_verdict"
+    },
+    "grok45-mini-fuser": {
+      "enabled": true,
+      "provider": "xai_api",
+      "model": "grok-4.5",
+      "role": "fuser",
+      "persona": "Mini-fuse compressor; return a short, evidence-grounded summary of the subagent result for the orchestrator.",
+      "reasoning": "low",
+      "effective_reasoning": "low",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 2048,
+      "timeout_seconds": 600,
+      "tool_policy": "none",
+      "structured_output": "final_answer"
+    },
+    "grok45-mini-judge": {
       "enabled": true,
       "provider": "xai_api",
       "model": "grok-4.5",
       "role": "judge",
-      "persona": "Anonymous Grok comparative judge.",
+      "persona": "Mini-fuse judge; check the review for contradictions without majority voting.",
+      "reasoning": "low",
+      "effective_reasoning": "low",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 2048,
+      "timeout_seconds": 600,
+      "tool_policy": "none",
+      "structured_output": "judge_analysis"
+    },
+    "grok45-mini-panel": {
+      "enabled": true,
+      "provider": "xai_api",
+      "model": "grok-4.5",
+      "role": "panel",
+      "persona": "Light-duty mini-fuse reviewer for completed subagent and adversarial-review work; verify the result against its task and flag concrete gaps.",
+      "reasoning": "low",
+      "effective_reasoning": "low",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 4096,
+      "timeout_seconds": 600,
+      "tool_policy": "none",
+      "structured_output": "panel_report"
+    },
+    "grok45-oauth-gate-primary": {
+      "enabled": true,
+      "provider": "grok_oauth",
+      "model": "grok-4.5",
+      "role": "verifier",
+      "persona": "Subscription-backed fail-closed approval reviewer; reject unsupported completion claims.",
+      "reasoning": "xhigh",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 24576,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "structured_output": "gate_verdict"
+    },
+    "grok45-oauth-gate-secondary": {
+      "enabled": true,
+      "provider": "grok_oauth",
+      "model": "grok-4.5",
+      "role": "verifier",
+      "persona": "Subscription-backed adversarial approval reviewer; seek counterexamples and missing evidence.",
+      "reasoning": "xhigh",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 24576,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "structured_output": "gate_verdict"
+    },
+    "grok45-oauth-judge": {
+      "enabled": true,
+      "provider": "grok_oauth",
+      "model": "grok-4.5",
+      "role": "judge",
+      "persona": "Subscription-backed anonymous comparative judge; diagnose contradictions without majority voting.",
       "reasoning": "xhigh",
       "effective_reasoning": "high",
       "reasoning_max_tokens": null,
@@ -285,20 +397,6 @@
       "timeout_seconds": 1200,
       "tool_policy": "none",
       "structured_output": "judge_analysis"
-    },
-    "all-grok-fuser": {
-      "enabled": true,
-      "provider": "xai_api",
-      "model": "grok-4.5",
-      "role": "fuser",
-      "persona": "Grok generative fuser preserving supported dissent.",
-      "reasoning": "xhigh",
-      "effective_reasoning": "high",
-      "reasoning_max_tokens": null,
-      "max_output_tokens": 49152,
-      "timeout_seconds": 1200,
-      "tool_policy": "none",
-      "structured_output": "final_answer"
     },
     "grok45-oauth-panel": {
       "enabled": true,
@@ -328,75 +426,19 @@
       "tool_policy": "none",
       "structured_output": "panel_report"
     },
-    "fable5-oauth-panel": {
+    "grok45-panel": {
       "enabled": true,
-      "provider": "claude_oauth",
-      "model": "claude-fable-5",
+      "provider": "xai_api",
+      "model": "grok-4.5",
       "role": "panel",
-      "persona": "Subscription-backed Fable panel seat in safe mode with tools disabled.",
+      "persona": "Independent evidence-first Grok researcher; preserve falsifiable minority findings.",
       "reasoning": "xhigh",
-      "effective_reasoning": "max",
+      "effective_reasoning": "high",
       "reasoning_max_tokens": null,
       "max_output_tokens": 32768,
       "timeout_seconds": 1200,
       "tool_policy": "none",
       "structured_output": "panel_report"
-    },
-    "grok45-oauth-judge": {
-      "enabled": true,
-      "provider": "grok_oauth",
-      "model": "grok-4.5",
-      "role": "judge",
-      "persona": "Subscription-backed anonymous comparative judge; diagnose contradictions without majority voting.",
-      "reasoning": "xhigh",
-      "effective_reasoning": "high",
-      "reasoning_max_tokens": null,
-      "max_output_tokens": 24576,
-      "timeout_seconds": 1200,
-      "tool_policy": "none",
-      "structured_output": "judge_analysis"
-    },
-    "fable5-oauth-fuser": {
-      "enabled": true,
-      "provider": "claude_oauth",
-      "model": "claude-fable-5",
-      "role": "fuser",
-      "persona": "Subscription-backed generative fuser; synthesize the strongest plan while preserving supported dissent.",
-      "reasoning": "xhigh",
-      "effective_reasoning": "max",
-      "reasoning_max_tokens": null,
-      "max_output_tokens": 49152,
-      "timeout_seconds": 1200,
-      "tool_policy": "none",
-      "structured_output": "final_answer"
-    },
-    "grok45-oauth-gate-primary": {
-      "enabled": true,
-      "provider": "grok_oauth",
-      "model": "grok-4.5",
-      "role": "verifier",
-      "persona": "Subscription-backed fail-closed approval reviewer; reject unsupported completion claims.",
-      "reasoning": "xhigh",
-      "effective_reasoning": "high",
-      "reasoning_max_tokens": null,
-      "max_output_tokens": 24576,
-      "timeout_seconds": 1200,
-      "tool_policy": "none",
-      "structured_output": "gate_verdict"
-    },
-    "grok45-oauth-gate-secondary": {
-      "enabled": true,
-      "provider": "grok_oauth",
-      "model": "grok-4.5",
-      "role": "verifier",
-      "persona": "Subscription-backed adversarial approval reviewer; seek counterexamples and missing evidence.",
-      "reasoning": "xhigh",
-      "effective_reasoning": "high",
-      "reasoning_max_tokens": null,
-      "max_output_tokens": 24576,
-      "timeout_seconds": 1200,
-      "tool_policy": "none",
-      "structured_output": "gate_verdict"
     },
     "openrouter-fusion-seat": {
       "enabled": true,
@@ -430,6 +472,23 @@
     }
   },
   "engines": {
+    "all_grok_4_5": {
+      "kind": "client_orchestrated",
+      "panel": [
+        "all-grok-panel-a",
+        "all-grok-panel-b"
+      ],
+      "optional_panel": [],
+      "judge": "all-grok-judge",
+      "fuser": "all-grok-fuser",
+      "min_live_seats": 2,
+      "max_concurrency": 2,
+      "independent_first_pass": true,
+      "anonymize_model_identity": true,
+      "prohibit_majority_vote": true,
+      "preserve_minority_findings": true,
+      "max_fusion_depth": 1
+    },
     "in_harness": {
       "kind": "client_orchestrated",
       "panel": [
@@ -446,6 +505,37 @@
       "anonymize_model_identity": true,
       "prohibit_majority_vote": true,
       "preserve_minority_findings": true,
+      "max_fusion_depth": 1
+    },
+    "mini_fuse": {
+      "anonymize_model_identity": true,
+      "fuser": "grok45-mini-fuser",
+      "independent_first_pass": true,
+      "judge": "grok45-mini-judge",
+      "kind": "client_orchestrated",
+      "max_concurrency": 1,
+      "max_fusion_depth": 1,
+      "min_live_seats": 1,
+      "optional_panel": [],
+      "panel": [
+        "grok45-mini-panel"
+      ],
+      "preserve_minority_findings": true,
+      "prohibit_majority_vote": true
+    },
+    "openrouter_fusion": {
+      "kind": "server_managed",
+      "enabled": true,
+      "seat": "openrouter-fusion-seat",
+      "analysis_models": [
+        "x-ai/grok-4.5",
+        "openai/gpt-5.6-sol",
+        "anthropic/claude-fable-5"
+      ],
+      "judge_model": "openai/gpt-5.6-sol",
+      "reasoning": "xhigh",
+      "fallback_engine": "in_harness",
+      "inherit_in_harness_settings": false,
       "max_fusion_depth": 1
     },
     "subscription_oauth": {
@@ -478,38 +568,6 @@
       "fuser": "fable5-oauth-fuser",
       "min_live_seats": 3,
       "max_concurrency": 3,
-      "independent_first_pass": true,
-      "anonymize_model_identity": true,
-      "prohibit_majority_vote": true,
-      "preserve_minority_findings": true,
-      "max_fusion_depth": 1
-    },
-    "openrouter_fusion": {
-      "kind": "server_managed",
-      "enabled": true,
-      "seat": "openrouter-fusion-seat",
-      "analysis_models": [
-        "x-ai/grok-4.5",
-        "openai/gpt-5.6-sol",
-        "anthropic/claude-fable-5"
-      ],
-      "judge_model": "openai/gpt-5.6-sol",
-      "reasoning": "xhigh",
-      "fallback_engine": "in_harness",
-      "inherit_in_harness_settings": false,
-      "max_fusion_depth": 1
-    },
-    "all_grok_4_5": {
-      "kind": "client_orchestrated",
-      "panel": [
-        "all-grok-panel-a",
-        "all-grok-panel-b"
-      ],
-      "optional_panel": [],
-      "judge": "all-grok-judge",
-      "fuser": "all-grok-fuser",
-      "min_live_seats": 2,
-      "max_concurrency": 2,
       "independent_first_pass": true,
       "anonymize_model_identity": true,
       "prohibit_majority_vote": true,
@@ -781,6 +839,33 @@
     }
   },
   "profiles": {
+    "all-grok-4.5": {
+      "engine": "all_grok_4_5",
+      "gate_set": "approval-gates",
+      "budgets": {
+        "enforcement": "hard_stop",
+        "unknown_cost_policy": "report_unknown",
+        "max_calls": 80,
+        "max_total_tokens": 4000000,
+        "max_input_tokens": 2400000,
+        "max_output_tokens": 800000,
+        "max_reasoning_tokens": null,
+        "max_tool_calls": 128,
+        "max_wall_seconds": null,
+        "max_cost_usd": 150.0,
+        "approval_threshold_usd": 25.0,
+        "warning_fraction": 0.8,
+        "reserve_fraction_for_synthesis_and_gates": 0.3
+      },
+      "execution": {
+        "owner": "claude_host",
+        "model": "claude-fable-5",
+        "reasoning": "xhigh",
+        "require_confirmed_plan": true,
+        "require_claude_goal": true,
+        "allow_recursive_claude_cli": false
+      }
+    },
     "maximum-intelligence": {
       "engine": "in_harness",
       "gate_set": "approval-gates",
@@ -809,6 +894,60 @@
         "run_tests": true,
         "require_diff_review": true,
         "max_fix_cycles": 2
+      }
+    },
+    "mini-fuse": {
+      "budgets": {
+        "enforcement": "hard_stop",
+        "unknown_cost_policy": "report_unknown",
+        "max_calls": 20,
+        "max_total_tokens": 600000,
+        "max_input_tokens": 400000,
+        "max_output_tokens": 100000,
+        "max_reasoning_tokens": null,
+        "max_tool_calls": 32,
+        "max_wall_seconds": null,
+        "max_cost_usd": 10.0,
+        "approval_threshold_usd": 5.0,
+        "warning_fraction": 0.8,
+        "reserve_fraction_for_synthesis_and_gates": 0.3
+      },
+      "engine": "mini_fuse",
+      "execution": {
+        "allow_recursive_claude_cli": false,
+        "model": "claude-fable-5",
+        "owner": "claude_host",
+        "reasoning": "low",
+        "require_claude_goal": true,
+        "require_confirmed_plan": true
+      },
+      "gate_set": "approval-gates"
+    },
+    "openrouter-fusion": {
+      "engine": "openrouter_fusion",
+      "gate_set": "approval-gates",
+      "budgets": {
+        "enforcement": "hard_stop",
+        "unknown_cost_policy": "report_unknown",
+        "max_calls": 80,
+        "max_total_tokens": 4000000,
+        "max_input_tokens": 2400000,
+        "max_output_tokens": 800000,
+        "max_reasoning_tokens": null,
+        "max_tool_calls": 128,
+        "max_wall_seconds": null,
+        "max_cost_usd": 150.0,
+        "approval_threshold_usd": 25.0,
+        "warning_fraction": 0.8,
+        "reserve_fraction_for_synthesis_and_gates": 0.3
+      },
+      "execution": {
+        "owner": "claude_host",
+        "model": "claude-fable-5",
+        "reasoning": "xhigh",
+        "require_confirmed_plan": true,
+        "require_claude_goal": true,
+        "allow_recursive_claude_cli": false
       }
     },
     "subscription-oauth": {
@@ -870,76 +1009,9 @@
         "require_diff_review": true,
         "max_fix_cycles": 2
       }
-    },
-    "openrouter-fusion": {
-      "engine": "openrouter_fusion",
-      "gate_set": "approval-gates",
-      "budgets": {
-        "enforcement": "hard_stop",
-        "unknown_cost_policy": "report_unknown",
-        "max_calls": 80,
-        "max_total_tokens": 4000000,
-        "max_input_tokens": 2400000,
-        "max_output_tokens": 800000,
-        "max_reasoning_tokens": null,
-        "max_tool_calls": 128,
-        "max_wall_seconds": null,
-        "max_cost_usd": 150.0,
-        "approval_threshold_usd": 25.0,
-        "warning_fraction": 0.8,
-        "reserve_fraction_for_synthesis_and_gates": 0.3
-      },
-      "execution": {
-        "owner": "claude_host",
-        "model": "claude-fable-5",
-        "reasoning": "xhigh",
-        "require_confirmed_plan": true,
-        "require_claude_goal": true,
-        "allow_recursive_claude_cli": false
-      }
-    },
-    "all-grok-4.5": {
-      "engine": "all_grok_4_5",
-      "gate_set": "approval-gates",
-      "budgets": {
-        "enforcement": "hard_stop",
-        "unknown_cost_policy": "report_unknown",
-        "max_calls": 80,
-        "max_total_tokens": 4000000,
-        "max_input_tokens": 2400000,
-        "max_output_tokens": 800000,
-        "max_reasoning_tokens": null,
-        "max_tool_calls": 128,
-        "max_wall_seconds": null,
-        "max_cost_usd": 150.0,
-        "approval_threshold_usd": 25.0,
-        "warning_fraction": 0.8,
-        "reserve_fraction_for_synthesis_and_gates": 0.3
-      },
-      "execution": {
-        "owner": "claude_host",
-        "model": "claude-fable-5",
-        "reasoning": "xhigh",
-        "require_confirmed_plan": true,
-        "require_claude_goal": true,
-        "allow_recursive_claude_cli": false
-      }
     }
   },
   "subagent_presets": {
-    "grok-fusion-drive": {
-      "driver": {
-        "owner": "claude_host",
-        "model": "claude-fable-5",
-        "reasoning": "max"
-      },
-      "worker_engine": "all_grok_4_5",
-      "worker_reasoning": "xhigh",
-      "gate_set": "approval-gates",
-      "batch_mode": "bounded_microbatch",
-      "max_parallel_subagents": 2,
-      "max_fusion_depth": 1
-    },
     "all-grok-4.5": {
       "driver": {
         "owner": "claude_host",
@@ -965,6 +1037,32 @@
       "batch_mode": "bounded_microbatch",
       "max_parallel_subagents": 3,
       "max_fusion_depth": 1
+    },
+    "grok-fusion-drive": {
+      "driver": {
+        "owner": "claude_host",
+        "model": "claude-fable-5",
+        "reasoning": "max"
+      },
+      "worker_engine": "all_grok_4_5",
+      "worker_reasoning": "xhigh",
+      "gate_set": "approval-gates",
+      "batch_mode": "bounded_microbatch",
+      "max_parallel_subagents": 2,
+      "max_fusion_depth": 1
+    },
+    "mini-fuse": {
+      "batch_mode": "bounded_microbatch",
+      "driver": {
+        "model": "claude-fable-5",
+        "owner": "claude_host",
+        "reasoning": "low"
+      },
+      "gate_set": "approval-gates",
+      "max_fusion_depth": 1,
+      "max_parallel_subagents": 4,
+      "worker_engine": "mini_fuse",
+      "worker_reasoning": "low"
     }
   },
   "lifecycle": {

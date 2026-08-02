@@ -1,5 +1,12 @@
 # Changelog
 
+## Claude Fusion Drive 0.1.2 (Claude Code edition) - 2026-08-02
+
+- Added `statusline.py`, a Claude Code statusline showing the active profile, fusion topology (panel/judge/fuser with effective reasoning), provider sign-in state, mini-fuse on/off, live job and workflow status from the runtime dir, Braintrust link state, and configurable numbered profile slots.
+- Added the light-duty **mini-fuse** configuration for subagent and adversarial-review summarization: `grok45-mini-panel`/`-judge`/`-fuser` seats (Grok 4.5, low reasoning, small output budgets), engine `mini_fuse`, profile `mini-fuse` with tight budgets, and subagent preset `mini-fuse`; toggled via seat `enabled` flags.
+- Added `fusion_ctl.py` (`profile <slot|name>`, `mini-fuse on|off|status`, `slots`, `status`) — profile and mini-fuse changes go through the validated propose/approve configuration flow; hotkey slots live in `<state>/statusline.json`.
+- Documented mini-fuse orchestration and statusline usage in the main skill. Claude Code keybindings cannot invoke shell commands, so profile switching uses `fusion_ctl.py` (e.g. a `fusion` shell wrapper or the `!` prompt escape) with the statusline slot legend.
+
 ## Claude Fusion Drive 0.1.1 (Claude Code edition) - 2026-08-02
 
 - Fixed the approval-gate verdict nesting bug: `FusionDriveEngine.approval_gate` read `verdict`/`passed` off the orchestrator's wrapper dict instead of the nested gate result, so every gate auto-recorded FAIL — including 2/2 PASS receipts — and live workflows required manual `lifecycle_gate_record` transcription. Verdicts now derive from the inner gate dict (`PASS`, `NEEDS_WORK` when all negative reviewer verdicts are NEEDS_WORK with no deterministic blocks, otherwise `FAIL`). Added `tests/test_engine_gate_contract.py` running `approval_gate` through the real `FusionOrchestrator`, and corrected the engine test fake to the real wrapper shape.
