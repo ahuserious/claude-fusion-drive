@@ -78,16 +78,36 @@ When, and only when, the user then asks to execute:
 4. Call `approval_gate_start` for `pre_execution` and wait for its durable
    result.
 5. Call `execution_start` with a hash of the exact approved scope.
-6. Perform the implementation using host-native tools and subagents.
+6. Perform the implementation using host-native tools and subagents. Before
+   dispatching each material subagent batch, call `approval_gate_start` with
+   `stage: "subagent_pre_execution"`, the current `workflow_id` and
+   `expected_lifecycle_sha256`, and an artifact stating the exact scope,
+   acceptance criteria, the resolved preset hash from `preset_resolve`, the
+   tool/path policy, cost and egress policy, and dependency boundaries. Do not
+   dispatch until the receipt is PASS. After the batch completes, record
+   `subagent_post_execution` the same way, using the lifecycle hash returned by
+   the previous call.
 7. Call `execution_finish` with the result/diff evidence hash.
 8. Run and record `post_execution`, `final`, and `summarize` gates in order.
 9. Mark the Claude goal complete only when all requested work and evidence are
    complete. Never mark a goal complete because time or context is low.
 
+If a workflow is abandoned, `workflow_list` shows every known workflow with an
+advisory `stale` flag once it has been idle past the expiry window. Close one
+with `workflow_abort`, passing an explicit reason and its current lifecycle
+hash; the receipt chain is preserved and no further transitions are legal.
+
 The confirmation receipt records a host event but cannot cryptographically prove
 human identity. Say this plainly when assurance boundaries matter.
 
 ## Per-subagent Fusion
+
+Every material subagent batch is bracketed by `subagent_pre_execution` (scope,
+before dispatch) and `subagent_post_execution` (result, after completion). Both
+are recorded with `approval_gate_start` (or `approval_gate`) naming that stage,
+the `workflow_id`, and the current lifecycle hash. Use `lifecycle_gate_record`
+only when the batch was dispatched entirely outside the plugin, and say so in
+the evidence. Use `subagent_fuse` only after external-cost confirmation.
 
 Call `preset_resolve` before spawning work:
 

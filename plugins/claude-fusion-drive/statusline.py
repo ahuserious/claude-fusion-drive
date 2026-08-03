@@ -30,6 +30,9 @@ sys.path.insert(0, str(PLUGIN_ROOT))
 RESET = "\033[0m"
 ANSI_PATTERN = re.compile(r"\033\[[0-9;]*m")
 TERMINAL_JOB_STATUSES = {"completed", "failed", "aborted"}
+# STATE_SHORT has no `aborted` entry, so without this an aborted workflow would
+# print its raw state name as a live chip until the mtime cutoff drops it.
+TERMINAL_WORKFLOW_STATES = {"complete", "aborted"}
 STALE_WORKFLOW_SECONDS = 7 * 24 * 3600
 DEFAULT_WIDTH = 120
 
@@ -264,7 +267,7 @@ def live_segment(state_root: Path) -> str:
                 state = str(json.loads(lifecycle_path.read_text(encoding="utf-8")).get("state", ""))
             except (json.JSONDecodeError, OSError):
                 continue
-            if state and state != "complete":
+            if state and state not in TERMINAL_WORKFLOW_STATES:
                 short = STATE_SHORT.get(state, state)
                 workflow_states[short] = workflow_states.get(short, 0) + 1
     parts = []

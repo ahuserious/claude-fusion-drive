@@ -12,6 +12,7 @@
 | PLAN-01 | Planning ends before execution | Main skill and lifecycle state machine | `test_lifecycle.py` |
 | PLAN-02 | Mermaid and full settings returned | `report.py`, `fuse` result | `test_reporting.py` |
 | PLAN-03 | Exact user confirmation | `confirm_plan` hash/CAS checks | `test_lifecycle.py` |
+| PLAN-04 | Abandoned workflows are discoverable and closable | Read-time `staleness` view, `list_workflows`, `abort_workflow` CAS transition | `test_workflow_expiry.py` |
 | GOAL-01 | Claude Code goal task after execute request | Host `claude_code.TaskCreate` receipt via `record_claude_goal` | `test_lifecycle.py` |
 | GOAL-02 | Legacy lifecycle receipt compatibility | Per-lifecycle host-tool binding with `create_goal` fallback | `test_lifecycle.py` |
 | GATE-01 | Grok approval gates | `approval-gates` invariant and engine translation | `test_config_contract.py`, `test_engine_translation.py` |

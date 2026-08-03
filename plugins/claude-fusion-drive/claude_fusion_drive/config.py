@@ -55,6 +55,22 @@ def load_config(*, include_user: bool = True, validate: bool = True) -> dict[str
     return config
 
 
+# The eight canonical lifecycle gate stages. lifecycle.py owns the transition
+# semantics; this set is what every shipped gate set must configure, and a test
+# pins it against lifecycle's own transition table so the two cannot diverge.
+CANONICAL_GATE_STAGES = frozenset(
+    {
+        "synthesis",
+        "plan",
+        "pre_execution",
+        "subagent_pre_execution",
+        "subagent_post_execution",
+        "post_execution",
+        "final",
+        "summarize",
+    }
+)
+
 REPORTING_DEFAULTS: dict[str, Any] = {
     "return_mermaid_after_planning": True,
     "return_full_redacted_config_after_planning": True,
@@ -194,16 +210,7 @@ def validate_config(config: Mapping[str, Any]) -> list[str]:
             if budgets.get("max_wall_seconds", "missing") is not None:
                 errors.append("maximum-intelligence max_wall_seconds must be null (unbounded)")
 
-    required_stages = {
-        "synthesis",
-        "plan",
-        "pre_execution",
-        "subagent_pre_execution",
-        "subagent_post_execution",
-        "post_execution",
-        "final",
-        "summarize",
-    }
+    required_stages = set(CANONICAL_GATE_STAGES)
     approval_gates = gate_sets.get("approval-gates", {})
     if not isinstance(approval_gates, Mapping):
         errors.append("gate_sets.approval-gates must be an object")

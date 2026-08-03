@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
 from .config import runtime_dir
-from .errors import LifecycleError
+from .errors import ConfigurationError, LifecycleError
 from .util import (
     atomic_write_json,
     canonical_hash,
@@ -27,6 +28,11 @@ MAIN_GATE_TRANSITIONS = {
 }
 NON_TRANSITION_GATES = {"synthesis", "subagent_pre_execution", "subagent_post_execution"}
 VERDICTS = {"PASS", "NEEDS_WORK", "FAIL"}
+TERMINAL_STATES = {"complete", "aborted"}
+# Deliberately a module constant, not configuration: putting it in the config
+# would change canonical_hash(config), which fuse() stamps as config_sha256, and
+# every pre-upgrade workflow would then fail to resume on immutable-input drift.
+WORKFLOW_EXPIRY_SECONDS = 7 * 24 * 3600
 
 
 def workflow_dir(workflow_id: str) -> Path:
@@ -210,6 +216,11 @@ def record_gate(
         }
         state["gates"][stage] = receipt
         prior_state = state["state"]
+        # Without this, aborted is not actually terminal: the NON_TRANSITION_GATES
+        # branch below sets transition = prior_state, which skips the rejection
+        # that would otherwise catch an illegal stage.
+        if prior_state == "aborted":
+            raise LifecycleError(f"Gate {stage} cannot be recorded while workflow is aborted")
         transition = MAIN_GATE_TRANSITIONS.get((prior_state, stage))
         if stage in NON_TRANSITION_GATES:
             transition = prior_state
@@ -323,6 +334,106 @@ def finish_execution(
     return _mutate(workflow_id, expected_lifecycle_sha256, apply)
 
 
+def abort_workflow(
+    workflow_id: str,
+    *,
+    reason: str,
+    expected_lifecycle_sha256: str,
+) -> dict[str, Any]:
+    """Terminally abort an abandoned workflow, preserving its whole hash chain.
+
+    Abort is a decision, not the passage of time, so it is a real compare-and-swap
+    transition with an appended event, while staleness stays a read-time view.
+    Nothing is removed: the workflow directory and every prior event stay exactly
+    as they were, and the aborted receipt is readable forever.
+    """
+
+    if not str(reason).strip():
+        raise LifecycleError("Aborting a workflow requires an explicit reason")
+
+    def apply(state: dict[str, Any]) -> None:
+        prior_state = state["state"]
+        if prior_state in TERMINAL_STATES:
+            raise LifecycleError(f"Workflow is already {prior_state} and cannot be aborted")
+        state["abort"] = {
+            "reason": str(reason).strip(),
+            "state_before": prior_state,
+            "recorded_at": now_utc(),
+        }
+        state["state"] = "aborted"
+        _append_event(state, "workflow_aborted", state["abort"])
+
+    return _mutate(workflow_id, expected_lifecycle_sha256, apply)
+
+
+def _age_seconds(updated_at: Any) -> float | None:
+    """Seconds since `updated_at`, or None when the timestamp is unusable.
+
+    Returns None rather than raising: this feeds a pure read that must keep
+    serving files it served before. A trailing `Z` is normalized because older
+    interpreters reject it, which would otherwise make the staleness flag depend
+    on the Python version. A naive timestamp is read as UTC, and the result is
+    clamped at zero so a backwards clock reports age 0 rather than a negative.
+    """
+
+    if not isinstance(updated_at, str):
+        return None
+    if updated_at.endswith("Z"):
+        updated_at = updated_at[:-1] + "+00:00"
+    try:
+        moment = datetime.fromisoformat(updated_at)
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return max(0.0, (datetime.now(timezone.utc) - moment).total_seconds())
+
+
+def _staleness(state: Mapping[str, Any]) -> dict[str, Any]:
+    age = _age_seconds(state.get("updated_at"))
+    terminal = state["state"] in TERMINAL_STATES
+    return {
+        "updated_at": state.get("updated_at"),
+        "age_seconds": None if age is None else int(age),
+        "expiry_seconds": WORKFLOW_EXPIRY_SECONDS,
+        # A terminal workflow is never stale: nothing is waiting on it.
+        "stale": None if age is None else (not terminal and age > WORKFLOW_EXPIRY_SECONDS),
+    }
+
+
+def list_workflows(limit: int = 50) -> dict[str, Any]:
+    """List known workflows oldest-updated first so stale ones surface.
+
+    Unreadable or hash-invalid files are skipped rather than raising: this is a
+    discovery read whose whole purpose is finding workflows that went wrong.
+    """
+
+    directory = runtime_dir() / "workflows"
+    entries: list[dict[str, Any]] = []
+    if directory.is_dir():
+        for path in sorted(directory.glob("*/host-lifecycle.json")):
+            try:
+                state = _validated_state(read_json(path))
+            except (ConfigurationError, LifecycleError, OSError, ValueError):
+                continue
+            staleness = _staleness(state)
+            entries.append(
+                {
+                    "workflow_id": state["workflow_id"],
+                    "state": state["state"],
+                    "updated_at": staleness["updated_at"],
+                    "age_seconds": staleness["age_seconds"],
+                    "stale": staleness["stale"],
+                }
+            )
+    entries.sort(key=lambda entry: (str(entry.get("updated_at") or ""), entry["workflow_id"]))
+    return {
+        "count": len(entries),
+        "expiry_seconds": WORKFLOW_EXPIRY_SECONDS,
+        "workflows": entries[: max(1, int(limit))],
+    }
+
+
 def lifecycle_summary(workflow_id: str) -> dict[str, Any]:
     state = load_lifecycle(workflow_id)
     host_goal_creation_tool = str(
@@ -340,6 +451,8 @@ def lifecycle_summary(workflow_id: str) -> dict[str, Any]:
         "gates": json_copy(state["gates"]),
         "confirmation": json_copy(state["confirmation"]),
         "claude_goal": json_copy(state["claude_goal"]),
+        "abort": json_copy(state.get("abort")),
+        "staleness": _staleness(state),
         "next_action": {
             "awaiting_plan_gate": "Run and record the plan approval gate.",
             "awaiting_user_confirmation": "Show the plan, Mermaid graph, and full configuration; wait for explicit user confirmation.",
@@ -354,6 +467,7 @@ def lifecycle_summary(workflow_id: str) -> dict[str, Any]:
             "awaiting_final": "Run and record the final gate.",
             "awaiting_summary": "Run and record the summarize gate.",
             "complete": "Workflow is complete.",
+            "aborted": "Workflow was aborted; no further transitions are legal.",
         }.get(state["state"], "Inspect lifecycle state."),
         "confirmation_limit": state["confirmation_limit"],
     }
