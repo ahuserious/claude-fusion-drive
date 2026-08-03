@@ -66,6 +66,8 @@ def test_mcp_exposes_complete_control_plane() -> None:
         "goal_record",
         "execution_start",
         "execution_finish",
+        "workflow_list",
+        "workflow_abort",
         "rescue_create",
         "rescue_resume",
         "human_sim_questions",
@@ -113,7 +115,7 @@ def test_subscription_doctor_checks_binaries_and_create_thread(
         },
     )
     assert result["ok"] is True
-    assert result["version"] == "0.1.4"
+    assert result["version"] == "0.1.5"
     assert result["capabilities"]["selected_profile"] == "subscription-oauth"
     assert result["capabilities"]["providers"]["claude_oauth"]["binary_available"] == "/resolved/claude"
     assert result["capabilities"]["providers"]["grok_oauth"]["binary_available"] == "/resolved/grok"
@@ -138,7 +140,7 @@ def test_hybrid_doctor_requires_xai_env_and_has_no_openrouter_dependency(
         },
     )
     assert result["ok"] is True
-    assert result["version"] == "0.1.4"
+    assert result["version"] == "0.1.5"
     capabilities = result["capabilities"]
     assert capabilities["required_providers"] == ["claude_oauth", "xai_api"]
     assert capabilities["providers"]["claude_oauth"]["binary_available"] == "/resolved/claude"

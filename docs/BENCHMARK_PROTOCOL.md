@@ -37,6 +37,26 @@ The validator expects one fusion plan and plan, pre-execution, post-execution, f
 
 Only the outcomes listed in [release evidence](RELEASE_EVIDENCE.md) are completed physical observations. The target protocol allows additional tasks and repeat attempts, but unexecuted jigs are not evidence. The public [artifact repository](https://github.com/ahuserious/codex-fusion-artifact/tree/limited-cost-2026-07-20) retains the selected results and opt-in wrappers.
 
+## The validator is pinned to the inherited universe
+
+`bench/harbor/mcp.json` launches the **drive** server, but `bench/validate_evidence.py`
+still pins `BENCHMARK_PROFILE_NAME = "maximum_intelligence"` and an expected config
+hash over the inherited `config/default.json`. The drive path stamps
+`profile_name: "fusion_drive"`, so the run-identity and config-hash checks already
+mismatch for `fuse`, and since `adversarial_gate` was re-routed onto the drive
+engine they mismatch for the gate stages too.
+
+The **shape** checks — top-level `run_id` and `gate.passed` — stay green, which is
+why `adversarial_gate` deliberately returns the inherited envelope with the drive
+fields appended rather than a re-shaped payload. Note also the stale
+`mcp__relentless_inception__` tool prefix in the validator versus the registered
+server name.
+
+The practical consequence: **the benchmark cannot currently validate the shipped
+server's identity claims**, so it is not evidence for drive-side changes. The
+pytest suite is. Repointing the validator needs a container run to verify and is
+deliberately out of scope here.
+
 ## Reproduction safety
 
 Benchmark runs are billable and resource-intensive. Use a fresh output directory, review every pin and mount, confirm Docker capacity, and set an explicit budget. The public wrappers refuse to start without `--execute`. Never publish the private output tree wholesale; create a reviewed allowlist and retain failures rather than deleting them.

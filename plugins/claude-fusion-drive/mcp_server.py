@@ -56,9 +56,11 @@ from claude_fusion_drive.jobs import (
     start_fuse_job,
 )
 from claude_fusion_drive.lifecycle import (
+    abort_workflow,
     confirm_plan,
     finish_execution,
     lifecycle_summary,
+    list_workflows,
     load_lifecycle,
     record_claude_goal,
     record_gate,
@@ -231,7 +233,7 @@ TOOLS = [
     ),
     _tool(
         "adversarial_gate",
-        "Compatibility alias for the inherited unrecorded adversarial gate. Prefer approval_gate for staged lifecycle receipts.",
+        "Compatibility alias that runs the active Fusion Drive profile's gate-set reviewers against the exact artifact SHA-256 and returns the inherited gate payload plus a derived verdict, without recording a lifecycle receipt. `profile` names a Fusion Drive profile (for example `maximum-intelligence`). Prefer approval_gate to also append a compare-and-swap lifecycle receipt.",
         {"task": TEXT, "artifact": TEXT, "mechanical_evidence": TEXT, "profile": TEXT, "resume_run_id": TEXT},
         ["task", "artifact"],
     ),
@@ -317,6 +319,17 @@ TOOLS = [
         "Record the execution result hash and move to post-execution verification.",
         {"workflow_id": TEXT, "result_sha256": TEXT, "expected_lifecycle_sha256": TEXT},
         ["workflow_id", "result_sha256", "expected_lifecycle_sha256"],
+    ),
+    _tool(
+        "workflow_list",
+        "List known workflows oldest-updated first with their state and advisory staleness so abandoned ones can be found.",
+        {"limit": {"type": "integer", "minimum": 1}},
+    ),
+    _tool(
+        "workflow_abort",
+        "Terminally abort a stale or abandoned workflow with an explicit reason; the append-only hash chain is preserved and nothing is deleted.",
+        {"workflow_id": TEXT, "reason": TEXT, "expected_lifecycle_sha256": TEXT},
+        ["workflow_id", "reason", "expected_lifecycle_sha256"],
     ),
     _tool(
         "rescue_create",
@@ -546,7 +559,26 @@ def call_tool(name: str, arguments: Mapping[str, Any]) -> Any:
     if name == "job_abort":
         return job_abort(str(arguments["job_id"]))
     if name == "adversarial_gate":
-        return legacy.call_tool(name, arguments)
+        # Compatibility alias: runs the drive config universe, the
+        # HybridProviderRegistry and the _gate_verdict unwrap, but the inherited
+        # top-level payload shape is preserved because the benchmark contract
+        # reads run_id and gate.passed at the top level. Records no receipt.
+        result = FusionDriveEngine().approval_gate(
+            str(arguments["task"]),
+            str(arguments["artifact"]),
+            stage="pre_execution",
+            mechanical_evidence=str(arguments.get("mechanical_evidence", "")),
+            profile_name=arguments.get("profile"),
+            resume_run_id=arguments.get("resume_run_id"),
+        )
+        gate_run = result["gate"]
+        return {
+            **gate_run,
+            "verdict": result["verdict"],
+            "artifact_sha256": result["artifact_sha256"],
+            "profile": result["profile"],
+            "engine": result["engine"],
+        }
     if name == "subagent_fuse":
         preset = resolve_preset(str(arguments["preset"]))
         drive = load_config()
@@ -667,6 +699,14 @@ def call_tool(name: str, arguments: Mapping[str, Any]) -> Any:
         return finish_execution(
             str(arguments["workflow_id"]),
             result_sha256=str(arguments["result_sha256"]),
+            expected_lifecycle_sha256=str(arguments["expected_lifecycle_sha256"]),
+        )
+    if name == "workflow_list":
+        return list_workflows(limit=int(arguments.get("limit", 50)))
+    if name == "workflow_abort":
+        return abort_workflow(
+            str(arguments["workflow_id"]),
+            reason=str(arguments["reason"]),
             expected_lifecycle_sha256=str(arguments["expected_lifecycle_sha256"]),
         )
     if name == "rescue_create":
