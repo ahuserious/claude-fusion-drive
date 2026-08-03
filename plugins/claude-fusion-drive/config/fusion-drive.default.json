@@ -1351,6 +1351,7 @@
     "return_full_redacted_config_after_planning": true,
     "return_reasoning_normalization": true,
     "return_updated_report_for_config_proposals": true,
+    "max_inline_response_chars": 24000,
     "theme": "warm_signal_light"
   }
 }

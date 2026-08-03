@@ -75,7 +75,7 @@ class PluginPackageIntegrityTests(unittest.TestCase):
         plugin_manifest = _load_json(PLUGIN_MANIFEST_PATH)
         default_config = load_config(include_user=False)
 
-        self.assertEqual(fusion_drive_version, "0.1.3")
+        self.assertEqual(fusion_drive_version, "0.1.4")
         self.assertEqual(plugin_manifest.get("version"), fusion_drive_version)
         self.assertEqual(inherited_engine_version, "0.1.4")
         self.assertEqual(doctor(default_config)["version"], inherited_engine_version)

@@ -19,7 +19,10 @@ def _patch_detached_worker(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
         return SimpleNamespace(pid=4242)
 
     monkeypatch.setattr(jobs.subprocess, "Popen", fake_popen)
-    monkeypatch.setattr(jobs, "_pid_is_alive", lambda _: True)
+    monkeypatch.setattr(jobs, "_pid_is_alive", lambda _pid, _started_at=None: True)
+    # Stub the OS start-time probe too, so `calls` stays a count of worker
+    # dispatches rather than also catching the probe's own `ps` invocation.
+    monkeypatch.setattr(jobs, "_process_started_at", lambda _pid: "Sat Aug  2 20:00:00 2026")
     return calls
 
 
@@ -280,7 +283,7 @@ def test_orphaned_worker_fails_closed_and_is_never_redispatched(
         idempotency_key="orphaned-fuse",
         confirmed_external_costs=True,
     )
-    monkeypatch.setattr(jobs, "_pid_is_alive", lambda _: False)
+    monkeypatch.setattr(jobs, "_pid_is_alive", lambda _pid, _started_at=None: False)
     status = jobs.job_status(started["job_id"])
     assert status["status"] == "failed"
     assert status["worker_state"] == "exited_without_receipt"

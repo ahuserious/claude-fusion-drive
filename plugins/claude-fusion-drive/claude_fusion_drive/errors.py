@@ -20,3 +20,7 @@ class CapabilityError(FusionDriveError):
 class ExternalActionRequired(FusionDriveError):
     """The host or user must explicitly approve an external action."""
 
+
+class LockTimeout(FusionDriveError):
+    """A runtime lock was held past the caller's deadline."""
+

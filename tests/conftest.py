@@ -12,7 +12,10 @@ if str(PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT))
 
 
-@pytest.fixture
+# autouse: without this every test reads the developer's live
+# ~/.claude/claude-fusion-drive/config.json, so switching profiles at runtime
+# breaks the suite and CI is green only because CI has no runtime config.
+@pytest.fixture(autouse=True)
 def isolated_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     drive_home = tmp_path / "claude-fusion-drive-home"
     engine_home = drive_home / "engine"

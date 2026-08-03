@@ -9,12 +9,13 @@ import json
 import os
 import re
 import tempfile
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Mapping, MutableMapping
 
-from .errors import ConfigurationError
+from .errors import ConfigurationError, LockTimeout
 
 
 SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -139,13 +140,59 @@ def reject_plaintext_secrets(value: Any, path: str = "") -> list[str]:
     return errors
 
 
+LOCK_TIMEOUT_SECONDS = 120.0
+LOCK_POLL_SECONDS = 0.05
+
+
 @contextmanager
-def exclusive_lock(path: Path) -> Iterator[None]:
+def exclusive_lock(path: Path, *, timeout: float = LOCK_TIMEOUT_SECONDS) -> Iterator[None]:
+    """Take an exclusive lock, giving up rather than blocking forever.
+
+    A blocking flock let one wedged provider CLI (subprocess timeout is 1800s)
+    stall every queued caller with nothing to point at. The holder writes its
+    identity into the lock file so a timeout can name who is holding it.
+    """
+
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise LockTimeout(
+                        f"Timed out after {timeout:.0f}s waiting for {path.name}; "
+                        f"held by {_lock_holder(handle)}"
+                    ) from None
+                time.sleep(LOCK_POLL_SECONDS)
         try:
+            handle.seek(0)
+            handle.truncate()
+            handle.write(json.dumps({"pid": os.getpid(), "acquired_at": now_utc()}))
+            handle.flush()
             yield
         finally:
+            try:
+                handle.seek(0)
+                handle.truncate()
+                handle.flush()
+            except OSError:
+                pass
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _lock_holder(handle: Any) -> str:
+    """Describe the current lock holder for a timeout message, best effort."""
+
+    try:
+        handle.seek(0)
+        record = json.loads(handle.read() or "{}")
+    except (OSError, ValueError):
+        return "an unknown process"
+    pid = record.get("pid")
+    if not pid:
+        return "an unknown process"
+    return f"pid {pid} since {record.get('acquired_at', 'an unknown time')}"
 
