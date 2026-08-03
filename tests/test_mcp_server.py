@@ -111,7 +111,7 @@ class McpServerSmokeTests(unittest.TestCase):
         self.assertEqual(initialize["protocolVersion"], "2025-06-18")
         self.assertEqual(
             initialize["serverInfo"],
-            {"name": "claude-fusion-drive", "version": "0.1.3"},
+            {"name": "claude-fusion-drive", "version": "0.1.4"},
         )
 
         tool_names = {tool["name"] for tool in responses[1]["result"]["tools"]}
@@ -180,7 +180,7 @@ class McpServerSmokeTests(unittest.TestCase):
         self.assertTrue(payloads[0]["errors"])
         self.assertFalse(responses[1]["result"]["isError"])
         self.assertFalse(payloads[1]["ok"])
-        self.assertEqual(payloads[1]["version"], "0.1.3")
+        self.assertEqual(payloads[1]["version"], "0.1.4")
         self.assertFalse(responses[2]["result"]["isError"])
         self.assertTrue(kill_file_created)
 

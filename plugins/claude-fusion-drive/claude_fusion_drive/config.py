@@ -55,6 +55,33 @@ def load_config(*, include_user: bool = True, validate: bool = True) -> dict[str
     return config
 
 
+REPORTING_DEFAULTS: dict[str, Any] = {
+    "return_mermaid_after_planning": True,
+    "return_full_redacted_config_after_planning": True,
+    "return_reasoning_normalization": True,
+    "return_updated_report_for_config_proposals": True,
+    "max_inline_response_chars": 24000,
+}
+
+
+def reporting_flags(config: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Resolve the `reporting` block, filling in anything the config omits.
+
+    Falls back to the defaults rather than raising, because this is read on the
+    response path: a malformed reporting block must not break a tool call that
+    otherwise succeeded.
+    """
+
+    try:
+        block = (config if config is not None else load_config(validate=False)).get("reporting")
+    except (ConfigurationError, OSError, ValueError):
+        block = None
+    flags = dict(REPORTING_DEFAULTS)
+    if isinstance(block, Mapping):
+        flags.update({key: block[key] for key in REPORTING_DEFAULTS if key in block})
+    return flags
+
+
 def _required_mapping(value: Mapping[str, Any], key: str, errors: list[str]) -> Mapping[str, Any]:
     child = value.get(key)
     if not isinstance(child, Mapping):
@@ -419,10 +446,36 @@ def proposal_path(proposal_hash: str) -> Path:
     return runtime_dir() / "proposals" / f"{validate_identifier(proposal_hash, 'proposal hash')}.json"
 
 
+def _reject_unroutable_changes(changes: Mapping[str, Any]) -> list[str]:
+    """Catch changes that would merge into a section that does not exist.
+
+    `deep_merge` happily creates whatever key it is given, so a dotted path
+    passed here (config_set takes those; this takes nested objects) or a typo'd
+    section name lands in the user's config as inert junk and silently does
+    nothing. Nested keys stay unchecked because adding a profile or a seat is a
+    legitimate new key.
+    """
+
+    known_sections = set(read_json(DEFAULT_CONFIG_PATH))
+    errors = []
+    for key in changes:
+        if "." in str(key):
+            errors.append(
+                f"{key} looks like a dotted path; propose_config takes a nested object "
+                "(use config_set for dotted paths)"
+            )
+        elif key not in known_sections:
+            errors.append(f"{key} is not a Claude Fusion Drive configuration section")
+    return errors
+
+
 def propose_config(changes: Mapping[str, Any], *, rationale: str = "") -> dict[str, Any]:
     secret_errors = reject_plaintext_secrets(changes)
     if secret_errors:
         raise ConfigurationError("Rejected proposed secrets:\n- " + "\n- ".join(secret_errors))
+    routing_errors = _reject_unroutable_changes(changes)
+    if routing_errors:
+        raise ConfigurationError("Rejected configuration proposal:\n- " + "\n- ".join(routing_errors))
     current = load_config()
     candidate = deep_merge(current, changes)
     errors = validate_config(candidate)

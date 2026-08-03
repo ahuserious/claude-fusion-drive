@@ -112,6 +112,7 @@ def _public_manifest(manifest: Mapping[str, Any], *, reused: bool | None = None)
             "config_sha256",
             "plugin_version",
             "worker_pid",
+            "worker_started_at",
             "worker_state",
             "created_at",
             "started_at",
@@ -240,6 +241,7 @@ def _start_job(
             }
             return _public_manifest(_save_manifest(manifest), reused=False)
         manifest["worker_pid"] = worker.pid
+        manifest["worker_started_at"] = _process_started_at(worker.pid)
         manifest["worker_state"] = "spawned"
         return _public_manifest(_save_manifest(manifest), reused=False)
 
@@ -322,7 +324,31 @@ def start_approval_gate_job(
     )
 
 
-def _pid_is_alive(pid: Any) -> bool:
+def _process_started_at(pid: int) -> str | None:
+    """Return the OS-reported start time of a pid, or None if unavailable.
+
+    Used to tell a live worker apart from an unrelated process that happens to
+    have inherited its recycled pid.
+    """
+
+    # Deliberately total: this is a diagnostic probe layered onto job dispatch,
+    # so no failure mode of it — missing `ps`, a sandbox, a patched subprocess —
+    # may propagate into starting or reaping a job. Returning None just means
+    # falling back to the plain pid check.
+    try:
+        completed = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        started = str(completed.stdout).strip()
+    except Exception:
+        return None
+    return started or None
+
+
+def _pid_is_alive(pid: Any, started_at: str | None = None) -> bool:
     if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
         return False
     try:
@@ -331,7 +357,12 @@ def _pid_is_alive(pid: Any) -> bool:
         return False
     except PermissionError:
         return True
-    return True
+    if started_at is None:
+        return True
+    # The pid is live, but a recycled pid belongs to some other process. Without
+    # this check a crashed worker looks alive forever and is never reclaimed.
+    observed = _process_started_at(pid)
+    return observed is None or observed == started_at
 
 
 def job_status(job_id: str) -> dict[str, Any]:
@@ -345,7 +376,7 @@ def job_status(job_id: str) -> dict[str, Any]:
         exited_without_receipt = (
             manifest["status"] not in TERMINAL_STATUSES
             and manifest.get("worker_pid") is not None
-            and not _pid_is_alive(manifest.get("worker_pid"))
+            and not _pid_is_alive(manifest.get("worker_pid"), manifest.get("worker_started_at"))
         )
         if queued_without_worker or exited_without_receipt:
             manifest["status"] = (
@@ -458,6 +489,7 @@ def run_job(
             manifest["worker_state"] = "running"
             manifest["started_at"] = now_utc()
             manifest["worker_pid"] = os.getpid()
+            manifest["worker_started_at"] = _process_started_at(os.getpid())
             _save_manifest(manifest)
 
         arguments = request["arguments"]

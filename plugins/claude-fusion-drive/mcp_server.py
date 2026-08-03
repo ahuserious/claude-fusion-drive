@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -29,6 +30,7 @@ from claude_fusion_drive.config import (
     propose_config,
     config_history,
     config_rollback_propose,
+    reporting_flags,
     runtime_dir,
     validate_config,
 )
@@ -404,6 +406,18 @@ def _single_change(path: str, value: Any) -> dict[str, Any]:
     return changes
 
 
+def _with_workflow_report(payload: dict[str, Any], config_key: str) -> dict[str, Any]:
+    """Attach the refreshed workflow report unless reporting has it switched off.
+
+    Every config mutation otherwise re-sends the whole report, which is the
+    single largest repeated payload in a configuration conversation.
+    """
+
+    if reporting_flags().get("return_updated_report_for_config_proposals", True):
+        payload["workflow_report"] = workflow_report(payload[config_key])
+    return payload
+
+
 def call_tool(name: str, arguments: Mapping[str, Any]) -> Any:
     if name == "config_show":
         return effective_config_report()
@@ -418,12 +432,10 @@ def call_tool(name: str, arguments: Mapping[str, Any]) -> Any:
             else arguments["changes"]
         )
         proposal = propose_config(changes, rationale=str(arguments.get("rationale", "")))
-        proposal["workflow_report"] = workflow_report(proposal["candidate"])
-        return proposal
+        return _with_workflow_report(proposal, "candidate")
     if name == "config_approve":
         approved = approve_config(str(arguments["proposal_hash"]), confirmed=bool(arguments["confirmed"]))
-        approved["workflow_report"] = workflow_report(approved["config"])
-        return approved
+        return _with_workflow_report(approved, "config")
     if name == "config_validate":
         errors = validate_config(load_config(validate=False))
         return {"ok": not errors, "errors": errors}
@@ -474,8 +486,7 @@ def call_tool(name: str, arguments: Mapping[str, Any]) -> Any:
             str(arguments["proposal_hash"]),
             rationale=str(arguments.get("rationale", "")),
         )
-        rollback["workflow_report"] = workflow_report(rollback["candidate"])
-        return rollback
+        return _with_workflow_report(rollback, "candidate")
     if name == "preset_resolve":
         return resolve_preset(str(arguments["name"]))
     if name == "fuse":
@@ -746,9 +757,58 @@ def _arguments(params: Mapping[str, Any]) -> dict[str, Any]:
     return value
 
 
+def _dump(value: Any) -> str:
+    return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False)
+
+
+def _spill_response(text: str) -> Path:
+    directory = runtime_dir() / "responses"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"response-{hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]}.json"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _render_json(value: Any) -> str:
+    """Serialize a payload, spilling oversized ones to a file.
+
+    A single unbounded result (a completed job carries whole per-seat
+    transcripts) can otherwise consume more context than the conversation it is
+    reported into. Spilling keeps the reply valid JSON — a naive character
+    truncation would emit a broken object — and tells the caller exactly which
+    section to read back and how big each one is.
+    """
+
+    text = _dump(value)
+    limit = reporting_flags().get("max_inline_response_chars")
+    limit = int(limit) if isinstance(limit, (int, float)) and not isinstance(limit, bool) else 0
+    if limit <= 0 or len(text) <= limit:
+        return text
+    try:
+        path = _spill_response(text)
+    except OSError:
+        # Losing the spill file is not a reason to fail an otherwise good call.
+        return text
+    sections = (
+        {key: len(_dump(item)) for key, item in value.items()} if isinstance(value, Mapping) else {}
+    )
+    return _dump(
+        {
+            "response_spilled": True,
+            "reason": (
+                f"Response is {len(text)} characters, over the {limit}-character inline limit "
+                "(reporting.max_inline_response_chars). The full payload was written to disk."
+            ),
+            "full_response_path": str(path),
+            "response_chars": len(text),
+            "section_chars": sections,
+        }
+    )
+
+
 def _text_result(value: Any, *, is_error: bool = False) -> dict[str, Any]:
     return {
-        "content": [{"type": "text", "text": json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False)}],
+        "content": [{"type": "text", "text": _render_json(value)}],
         "isError": is_error,
     }
 
@@ -809,7 +869,7 @@ def handle(message: Mapping[str, Any]) -> dict[str, Any] | None:
                 {
                     "uri": uri,
                     "mimeType": "application/json",
-                    "text": json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False),
+                    "text": _render_json(value),
                 }
             ]
         }

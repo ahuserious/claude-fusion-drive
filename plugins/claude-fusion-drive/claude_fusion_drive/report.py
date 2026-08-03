@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from .config import effective_config_report, load_config
+from .config import effective_config_report, load_config, reporting_flags
 from .errors import ConfigurationError
 from .presets import list_presets
 from .util import json_copy
@@ -97,10 +97,17 @@ def gate_inventory(
 def workflow_report(config: Mapping[str, Any] | None = None, *, profile_name: str | None = None) -> dict[str, Any]:
     config = dict(config or load_config())
     profile_name = profile_name or str(config["active_profile"])
+    flags = reporting_flags(config)
     effective = effective_config_report(config)
-    return {
+    # The redacted config is by far the largest thing this report carries and it
+    # duplicates config_show verbatim; config_hash and validation stay either way
+    # because the exact-hash approval flow depends on them.
+    if not flags["return_full_redacted_config_after_planning"]:
+        effective.pop("config", None)
+    if not flags["return_reasoning_normalization"]:
+        effective.pop("reasoning", None)
+    report = {
         "profile": profile_name,
-        "mermaid": workflow_mermaid(config, profile_name=profile_name),
         "gates": gate_inventory(config, profile_name=profile_name),
         "subagent_presets": list_presets(config),
         "batching": json_copy(config["batching"]),
@@ -108,6 +115,9 @@ def workflow_report(config: Mapping[str, Any] | None = None, *, profile_name: st
         "lifecycle": json_copy(config["lifecycle"]),
         **effective,
     }
+    if flags["return_mermaid_after_planning"]:
+        report["mermaid"] = workflow_mermaid(config, profile_name=profile_name)
+    return report
 
 
 def gate_set_list(config: Mapping[str, Any] | None = None) -> dict[str, Any]:

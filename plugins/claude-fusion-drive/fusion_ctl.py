@@ -20,6 +20,12 @@ Subcommands:
                            GUI editor).
   slots [set <n> <profile>]  Show or edit the statusline hotkey slots.
   status                   One-line summary (same data the statusline shows).
+  watch [job-id] [--once] [--interval <s>]
+                           Live per-seat view of running fusion work. Run it as
+                           a Claude Code background Bash task and it becomes an
+                           openable entry in the agent view (left arrow), which
+                           is the only way seat progress can surface there — an
+                           MCP server cannot register agent-view entries itself.
 
 Profile and mini-fuse changes go through the plugin's own propose/approve
 configuration flow, so they are schema-validated, secret-checked, and locked.
@@ -32,6 +38,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).resolve().parent
@@ -299,6 +306,135 @@ def cmd_status() -> int:
     return 0
 
 
+TERMINAL_JOB_STATUSES = {"completed", "failed", "aborted"}
+
+
+def _read_json_or_none(path: Path) -> dict | None:
+    """Read a run-store file, tolerating the writer being mid-rewrite."""
+
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _active_jobs() -> list[dict]:
+    jobs_dir = runtime_dir() / "jobs"
+    found = []
+    for manifest_path in sorted(jobs_dir.glob("job-*/job.json")):
+        manifest = _read_json_or_none(manifest_path)
+        if manifest and manifest.get("status") not in TERMINAL_JOB_STATUSES:
+            found.append(manifest)
+    return found
+
+
+def _seat_rows(job_id: str) -> tuple[list[tuple[str, str, str, str]], dict]:
+    """Build (seat, role, status, detail) rows for a job, newest state first.
+
+    Reads what the orchestrator already persists: panel.json is rewritten after
+    every seat completes, and ledger.json reserves an attempt row before a seat's
+    transport even starts, which is what makes in-flight seats visible.
+    """
+
+    run_dir = runtime_dir() / "engine" / "runs" / job_id
+    panel = _read_json_or_none(run_dir / "panel.json") or {}
+    ledger = _read_json_or_none(run_dir / "ledger.json") or {}
+    manifest = _read_json_or_none(run_dir / "manifest.json") or {}
+
+    rows: list[tuple[str, str, str, str]] = []
+    finished = set()
+    for result in panel.get("results", []):
+        seat = str(result.get("seat_name", "?"))
+        finished.add(seat)
+        response = result.get("response") or {}
+        if result.get("error"):
+            detail = str(result["error"])[:60]
+        else:
+            latency = response.get("latency_seconds")
+            model = response.get("actual_model", "")
+            detail = f"{model} {latency:.0f}s" if isinstance(latency, (int, float)) else str(model)
+        rows.append((seat, str(result.get("role", "")), str(result.get("status", "?")), detail))
+
+    # Only panel seats land in panel.json, so judge/fuser/gate seats are known
+    # solely from their reserved ledger attempt. Their stage record is what says
+    # whether they are actually still running or already done.
+    stages = manifest.get("stages") or {}
+    for entry in ledger.get("attempt_entries", []):
+        seat = str(entry.get("seat", "?"))
+        if seat in finished:
+            continue
+        stage = str(entry.get("stage", ""))
+        record = stages.get(stage) or next(
+            (value for key, value in stages.items() if key.startswith(stage) and stage), None
+        )
+        status = str((record or {}).get("status") or "in-flight")
+        detail = "awaiting response" if status == "in-flight" else str((record or {}).get("updated_at", ""))
+        rows.append((seat, stage, status, detail))
+        finished.add(seat)
+    return rows, {"panel": panel, "manifest": manifest}
+
+
+def _render_watch(job: dict) -> None:
+    job_id = str(job.get("job_id", "?"))
+    rows, extra = _seat_rows(job_id)
+    panel = extra["panel"]
+    stages = extra["manifest"].get("stages") or {}
+    stage_summary = " ".join(
+        f"{name}:{(value or {}).get('status', '?')}" for name, value in sorted(stages.items())
+    )
+    print(f"[{job_id}] {job.get('operation', 'fuse')} · {job.get('status', '?')} · {job.get('profile', '')}")
+    if stage_summary:
+        print(f"  stages  {stage_summary}")
+    if panel:
+        print(
+            f"  panel   live={panel.get('live_count', 0)} failed={panel.get('failed_count', 0)}"
+            f" degraded={bool(panel.get('degraded'))}"
+        )
+    if not rows:
+        print("  seats   (none reported yet)")
+    for seat, role, status, detail in rows:
+        print(f"  {status:<10} {seat:<28} {role:<10} {detail}")
+    sys.stdout.flush()
+
+
+def cmd_watch(rest: list[str]) -> int:
+    interval = 5.0
+    once = False
+    job_id = None
+    index = 0
+    while index < len(rest):
+        token = rest[index]
+        if token == "--once":
+            once = True
+        elif token == "--interval" and index + 1 < len(rest):
+            index += 1
+            try:
+                interval = max(1.0, float(rest[index]))
+            except ValueError:
+                print(f"fusion watch: bad --interval value {rest[index]!r}")
+                return 1
+        elif not token.startswith("-"):
+            job_id = token
+        index += 1
+
+    while True:
+        jobs = _active_jobs()
+        if job_id is not None:
+            manifest = _read_json_or_none(runtime_dir() / "jobs" / job_id / "job.json")
+            jobs = [manifest] if manifest else []
+        if not jobs:
+            print("no active fusion jobs" if job_id is None else f"job {job_id} not found or finished")
+            return 0
+        for job in jobs:
+            _render_watch(job)
+        if once:
+            return 0
+        if all(job.get("status") in TERMINAL_JOB_STATUSES for job in jobs):
+            return 0
+        print("")
+        time.sleep(interval)
+
+
 def main() -> int:
     args = sys.argv[1:]
     if not args:
@@ -321,6 +457,8 @@ def main() -> int:
         return cmd_slots(rest)
     if command == "status":
         return cmd_status()
+    if command == "watch":
+        return cmd_watch(rest)
     print(__doc__)
     return 1
 

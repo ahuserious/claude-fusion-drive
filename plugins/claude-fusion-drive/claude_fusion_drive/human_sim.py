@@ -207,6 +207,19 @@ def record_campaign_iteration(
         if performance_pass is not None:
             manifest["performance_pass"] = bool(performance_pass)
         if criteria_evidenced is not None:
+            # Refuse a manifest that claims full evidence next to unfinished
+            # scenarios; the pair reads as a stop condition to anyone skimming
+            # the report, even though `complete` is computed independently.
+            pending = [
+                str(item["scenario_id"])
+                for item in manifest["scenarios"]
+                if item["status"] != "passed"
+            ]
+            if criteria_evidenced and pending:
+                raise ConfigurationError(
+                    "Cannot record all_criteria_evidenced=true while these scenarios have not "
+                    "passed: " + ", ".join(sorted(pending))
+                )
             manifest["all_criteria_evidenced"] = bool(criteria_evidenced)
         manifest["stalled_subagents"] = sorted(set(str(item) for item in stalled_subagents))
         manifest["updated_at"] = iteration["recorded_at"]

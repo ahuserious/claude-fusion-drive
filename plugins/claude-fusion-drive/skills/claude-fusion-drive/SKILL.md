@@ -155,6 +155,28 @@ merge is involved.
   `fusion profile 2`, or `!fusion profile 2` from the Claude Code prompt);
   configure slots with `fusion_ctl.py slots set <n> <profile>`.
 
+## Watching seats while they run
+
+A fuse can run for 15+ minutes as a single blocking tool call, and the MCP
+server cannot register anything in the Claude Code agent view — only work the
+host itself spawned appears there. Background Bash tasks *do* appear and are
+openable, so that is the supported way to watch seats:
+
+- When starting async work with `fuse_start`, also launch
+  `fusion watch <job-id>` (or bare `fusion watch` for all active jobs) as a
+  **background Bash task**. The user then reaches it with the left arrow and
+  sees per-seat status, model, and latency updating live.
+- `fusion watch --once` prints a single snapshot for inline use; `--interval
+  <seconds>` sets the poll period (default 5). It exits by itself when the job
+  reaches a terminal state, so it never lingers as a stuck background task.
+- It is a read-only consumer of `panel.json`, `ledger.json`, and `manifest.json`
+  in the run store. It never mutates job state and cannot affect the evidence
+  chain.
+
+Do not attempt to model individual seats as host subagents: the host Agent tool
+can only target Claude models, and a seat is a single tool-free schema-bound
+completion on Grok or GPT, not an agentic loop.
+
 ## Orchestration toggles (fusion-plan, preset, subagent review)
 
 Read the toggles from `<state>/statusline.json` (`"toggles"`; defaults:
