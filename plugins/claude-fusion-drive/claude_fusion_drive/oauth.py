@@ -30,6 +30,10 @@ from .util import atomic_write_text, canonical_json, exclusive_lock, text_hash
 
 EMAIL_PATTERN = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
 TOKEN_PATTERN = re.compile(r"\b(?:sk|xai|oauth|bearer)[-_A-Za-z0-9.]{12,}\b", re.IGNORECASE)
+# The Grok CLI names two of these in camelCase. Omitting its spellings made
+# _is_result_envelope reject the envelope entirely, so the whole telemetry
+# payload — cost, session ids, the model's private reasoning — was canonicalised
+# and returned as if it were the seat's answer.
 ENVELOPE_FIELDS = {
     "content",
     "error",
@@ -38,8 +42,11 @@ ENVELOPE_FIELDS = {
     "response",
     "result",
     "structured_output",
+    "structuredOutput",
     "subtype",
+    "text",
 }
+STRUCTURED_OUTPUT_FIELDS = ("structured_output", "structuredOutput")
 OAUTH_API_KEY_ENVIRONMENTS = ("ANTHROPIC_API_KEY", "XAI_API_KEY", "OPENAI_API_KEY")
 CLI_OAUTH_TRANSPORTS = frozenset({"claude_cli_oauth", "grok_cli_oauth", "codex_cli_oauth"})
 
@@ -316,13 +323,16 @@ def _extract_text(
             )
         )
 
-    if response_schema is not None and "structured_output" in envelope:
-        structured_text = _canonical_model_text(envelope.get("structured_output"))
+    structured_field = next(
+        (field for field in STRUCTURED_OUTPUT_FIELDS if field in envelope), None
+    )
+    if response_schema is not None and structured_field is not None:
+        structured_text = _canonical_model_text(envelope.get(structured_field))
         if structured_text is None:
             raise _CliOutputFailure(
                 _diagnostics(
                     raw_output,
-                    value=envelope.get("structured_output"),
+                    value=envelope.get(structured_field),
                     category="null_or_empty_structured_output",
                     exit_status=0,
                 )
@@ -415,7 +425,16 @@ def _codex_result(raw_output: str, last_message: str) -> tuple[str, dict[str, An
     return text, metadata
 
 
-def _usage(payload: Mapping[str, Any]) -> Usage:
+def _usage(payload: Mapping[str, Any], *, cached_is_subset: bool = True) -> Usage:
+    """Normalise one CLI's usage block.
+
+    Most providers report cached tokens as a detail *inside* input_tokens. The
+    Grok CLI reports them alongside: measured on a live call, input 64561 +
+    cache_read 128 + output 19 equals its own total of 64708. Leaving that
+    unnormalised breaks the cached <= input invariant every budget check relies
+    on, so a disjoint counter is folded into input here.
+    """
+
     raw = payload.get("usage", {})
     if not isinstance(raw, Mapping):
         raw = {}
@@ -444,6 +463,9 @@ def _usage(payload: Mapping[str, Any]) -> Usage:
         usage_error = "CLI returned invalid usage metadata"
     elif raw and not input_output_usage_complete:
         usage_error = "CLI returned incomplete usage metadata"
+
+    if not cached_is_subset and cached_tokens:
+        input_tokens += cached_tokens
 
     return Usage(
         input_tokens=input_tokens,
@@ -623,8 +645,12 @@ class SubscriptionCliAdapter:
                         reasoning["effective"],
                         "--output-format",
                         "json",
-                        "--tools",
-                        "",
+                        # `--tools` is an ALLOW list, so an empty value is not a
+                        # deny — it simply sets no override and every built-in
+                        # tool stays live. Verified against the Grok CLI: only a
+                        # deny rule actually blocks execution.
+                        "--deny",
+                        "*",
                         "--no-subagents",
                         "--disable-web-search",
                         "--no-memory",
@@ -699,13 +725,14 @@ class SubscriptionCliAdapter:
                     record_semantic_failure(exc.diagnostics, metadata=metadata)
                     raise
                 actual_model = str(metadata.get("model", model))
+                cached_is_subset = transport != "grok_cli_oauth"
                 request_id = metadata.get("request_id") or metadata.get("session_id")
                 return ModelResponse(
                     text=text,
                     provider=provider_name,
                     requested_model=model,
                     actual_model=actual_model,
-                    usage=_usage(metadata),
+                    usage=_usage(metadata, cached_is_subset=cached_is_subset),
                     latency_seconds=time.monotonic() - started,
                     request_id=str(request_id) if request_id else None,
                     route=base_route(),

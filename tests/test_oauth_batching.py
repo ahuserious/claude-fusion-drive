@@ -660,3 +660,117 @@ def test_microbatch_preserves_order_and_failures() -> None:
     assert result[0] == {"ok": True, "value": 10}
     assert result[1]["ok"] is False
     assert result[2] == {"ok": True, "value": 30}
+
+
+def test_grok_camel_case_envelope_is_not_returned_as_the_answer(
+    isolated_runtime, monkeypatch
+) -> None:
+    """The Grok CLI names its fields in camelCase.
+
+    When those spellings were unrecognised the envelope failed the result-shape
+    check, so the whole telemetry payload — cost, session ids, the model's
+    private reasoning — was canonicalised and handed back as the seat's answer.
+    """
+    monkeypatch.setattr("claude_fusion_drive.oauth.shutil.which", lambda _: "/usr/bin/grok")
+
+    def fake_run(args, **kwargs):
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "modelUsage": {"grok-4.5": {"costUSD": 0.12}},
+                    "sessionId": "019fd10e-d0ad-7500",
+                    "thought": "private reasoning that must not leak into the panel",
+                    "structuredOutput": {"answer": "4"},
+                    "text": '{"answer":"4"}',
+                    "usage": {"input_tokens": 5, "output_tokens": 2},
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr("claude_fusion_drive.oauth.subprocess.run", fake_run)
+    response = SubscriptionCliAdapter(load_config(include_user=False)).complete(
+        "grok45-oauth-panel",
+        system="Panel seat.",
+        prompt="What is 2+2?",
+        response_schema={"type": "object", "properties": {"answer": {"type": "string"}}},
+    )
+
+    assert response.text == '{"answer":"4"}'
+    assert "thought" not in response.text
+    assert "costUSD" not in response.text
+    assert response.usage.input_tokens == 5
+
+
+def test_grok_seat_denies_tools_rather_than_passing_an_empty_allow_list(
+    isolated_runtime, monkeypatch
+) -> None:
+    """`--tools ""` is an empty ALLOW list, not a deny.
+
+    The Grok CLI leaves every built-in tool live when no allow override is
+    given, so a seat launched that way could read files and run commands while
+    its receipt still advertised tools_disabled. Only a deny rule blocks it.
+    """
+    captured = {}
+    monkeypatch.setattr("claude_fusion_drive.oauth.shutil.which", lambda _: "/usr/bin/grok")
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({"structuredOutput": {"answer": "4"}, "text": '{"answer":"4"}'}),
+            stderr="",
+        )
+
+    monkeypatch.setattr("claude_fusion_drive.oauth.subprocess.run", fake_run)
+    response = SubscriptionCliAdapter(load_config(include_user=False)).complete(
+        "grok45-oauth-panel", system="s", prompt="p"
+    )
+
+    args = captured["args"]
+    assert "--deny" in args
+    assert args[args.index("--deny") + 1] == "*"
+    # An empty allow list must never be used as the disabling mechanism again.
+    assert "--tools" not in args
+    assert "--disable-web-search" in args
+    assert "--no-subagents" in args
+    assert response.route["tools_disabled"] is True
+
+
+def test_grok_disjoint_cache_counter_is_folded_into_input(
+    isolated_runtime, monkeypatch
+) -> None:
+    """Grok reports cache reads alongside input, not inside it.
+
+    Measured live: input 64561 + cache_read 128 + output 19 == its own total of
+    64708. Left unnormalised, cached can exceed input and break the invariant
+    every budget check depends on.
+    """
+    monkeypatch.setattr("claude_fusion_drive.oauth.shutil.which", lambda _: "/usr/bin/grok")
+
+    def fake_run(args, **kwargs):
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "structuredOutput": {"answer": "4"},
+                    "text": '{"answer":"4"}',
+                    "usage": {
+                        "input_tokens": 64561,
+                        "cache_read_input_tokens": 128,
+                        "output_tokens": 19,
+                    },
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr("claude_fusion_drive.oauth.subprocess.run", fake_run)
+    response = SubscriptionCliAdapter(load_config(include_user=False)).complete(
+        "grok45-oauth-panel", system="s", prompt="p"
+    )
+
+    assert response.usage.input_tokens == 64561 + 128
+    assert response.usage.cached_tokens == 128
+    assert response.usage.cached_tokens <= response.usage.input_tokens

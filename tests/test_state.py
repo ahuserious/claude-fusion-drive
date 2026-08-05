@@ -1012,3 +1012,24 @@ class ApprovalThresholdTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_token_ceilings_ignore_prompt_cache_reads() -> None:
+    """A ceiling must not be exhausted by re-sent, cached context.
+
+    Mirrors an observed debate: 3,501,525 input of which 3,179,008 were cache
+    reads. Only 322,517 tokens were genuinely new, so a 2.4M ceiling must not
+    fire, while a ceiling below the fresh figure still must.
+    """
+    from relentless_inception.state import BudgetTracker
+
+    tracker = BudgetTracker({"max_input_tokens": 2_400_000, "enforcement": "hard_stop"})
+    tracker.input_tokens = 3_501_525
+    tracker.cached_tokens = 3_179_008
+    tracker.output_tokens = 121_355
+
+    observed = tracker._observed_usage()
+    assert observed["input_tokens"] == 322_517
+    assert observed["total_tokens"] == 322_517 + 121_355
+    # Raw counters remain intact for reporting.
+    assert tracker.input_tokens == 3_501_525
