@@ -736,3 +736,41 @@ def test_grok_seat_denies_tools_rather_than_passing_an_empty_allow_list(
     assert "--disable-web-search" in args
     assert "--no-subagents" in args
     assert response.route["tools_disabled"] is True
+
+
+def test_grok_disjoint_cache_counter_is_folded_into_input(
+    isolated_runtime, monkeypatch
+) -> None:
+    """Grok reports cache reads alongside input, not inside it.
+
+    Measured live: input 64561 + cache_read 128 + output 19 == its own total of
+    64708. Left unnormalised, cached can exceed input and break the invariant
+    every budget check depends on.
+    """
+    monkeypatch.setattr("claude_fusion_drive.oauth.shutil.which", lambda _: "/usr/bin/grok")
+
+    def fake_run(args, **kwargs):
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "structuredOutput": {"answer": "4"},
+                    "text": '{"answer":"4"}',
+                    "usage": {
+                        "input_tokens": 64561,
+                        "cache_read_input_tokens": 128,
+                        "output_tokens": 19,
+                    },
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr("claude_fusion_drive.oauth.subprocess.run", fake_run)
+    response = SubscriptionCliAdapter(load_config(include_user=False)).complete(
+        "grok45-oauth-panel", system="s", prompt="p"
+    )
+
+    assert response.usage.input_tokens == 64561 + 128
+    assert response.usage.cached_tokens == 128
+    assert response.usage.cached_tokens <= response.usage.input_tokens

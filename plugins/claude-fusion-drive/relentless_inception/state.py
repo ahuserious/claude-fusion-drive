@@ -843,12 +843,23 @@ class BudgetTracker:
             self._block_dispatch(f"Wall-time budget of {limit} seconds exhausted before dispatch")
 
     def _observed_usage(self) -> Dict[str, float]:
+        # Prompt-cache reads are re-sent context, not fresh consumption. A
+        # multi-round debate re-sends its whole transcript every turn, so a
+        # ceiling charged on raw input is exhausted by tokens the provider
+        # never reprocessed and barely billed: one observed run reached
+        # 3,501,525 input of which 3,179,008 — 91% — were cache reads, tripping
+        # a 2.4M ceiling on 322,517 tokens of genuinely new context.
+        #
+        # Recorded usage guarantees cached <= input (see the snapshot invariant
+        # and the provider validation), so the subtraction is well defined.
+        # Raw counters stay untouched for reporting; only enforcement changes.
+        fresh_input = max(0.0, float(self.input_tokens - self.cached_tokens))
         return {
             # Provider usage APIs report cached tokens as an input-token detail
             # and reasoning tokens as an output-token detail. Adding either
             # breakdown again would double-count billed tokens.
-            "total_tokens": float(self.input_tokens + self.output_tokens),
-            "input_tokens": float(self.input_tokens),
+            "total_tokens": fresh_input + float(self.output_tokens),
+            "input_tokens": fresh_input,
             "output_tokens": float(self.output_tokens),
             "reasoning_tokens": float(self.reasoning_tokens),
             "tool_calls": float(self.tool_calls),

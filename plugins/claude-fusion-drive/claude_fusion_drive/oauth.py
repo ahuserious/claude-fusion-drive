@@ -425,7 +425,16 @@ def _codex_result(raw_output: str, last_message: str) -> tuple[str, dict[str, An
     return text, metadata
 
 
-def _usage(payload: Mapping[str, Any]) -> Usage:
+def _usage(payload: Mapping[str, Any], *, cached_is_subset: bool = True) -> Usage:
+    """Normalise one CLI's usage block.
+
+    Most providers report cached tokens as a detail *inside* input_tokens. The
+    Grok CLI reports them alongside: measured on a live call, input 64561 +
+    cache_read 128 + output 19 equals its own total of 64708. Leaving that
+    unnormalised breaks the cached <= input invariant every budget check relies
+    on, so a disjoint counter is folded into input here.
+    """
+
     raw = payload.get("usage", {})
     if not isinstance(raw, Mapping):
         raw = {}
@@ -454,6 +463,9 @@ def _usage(payload: Mapping[str, Any]) -> Usage:
         usage_error = "CLI returned invalid usage metadata"
     elif raw and not input_output_usage_complete:
         usage_error = "CLI returned incomplete usage metadata"
+
+    if not cached_is_subset and cached_tokens:
+        input_tokens += cached_tokens
 
     return Usage(
         input_tokens=input_tokens,
@@ -713,13 +725,14 @@ class SubscriptionCliAdapter:
                     record_semantic_failure(exc.diagnostics, metadata=metadata)
                     raise
                 actual_model = str(metadata.get("model", model))
+                cached_is_subset = transport != "grok_cli_oauth"
                 request_id = metadata.get("request_id") or metadata.get("session_id")
                 return ModelResponse(
                     text=text,
                     provider=provider_name,
                     requested_model=model,
                     actual_model=actual_model,
-                    usage=_usage(metadata),
+                    usage=_usage(metadata, cached_is_subset=cached_is_subset),
                     latency_seconds=time.monotonic() - started,
                     request_id=str(request_id) if request_id else None,
                     route=base_route(),
