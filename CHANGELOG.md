@@ -1,5 +1,69 @@
 # Changelog
 
+## Claude Fusion Drive 0.2.1 (Claude Code edition) - 2026-08-05
+
+- Added the `codex_cli_oauth` transport and a `codex_oauth` provider, so
+  `gpt-5.6-sol` panel/judge/fuser seats can bill the ChatGPT subscription
+  through the Codex CLI instead of a metered `OPENAI_API_KEY`. Ships
+  `sol-codex-panel`, `sol-codex-judge`, and `sol-codex-fuser`.
+- `OPENAI_API_KEY` now joins `ANTHROPIC_API_KEY` and `XAI_API_KEY` in the set
+  stripped from every CLI OAuth child process. Without this, a metered key in
+  the environment silently overrides the subscription path the seat asked for.
+- Codex seats run `codex exec --ignore-user-config` with a read-only sandbox
+  and web search disabled. Because Codex has no empty-tool-list switch, their
+  route reports `tools_disabled: false` rather than overclaiming.
+- Reasoning normalization for Codex: verified against codex-cli 0.144.5, which
+  rejects `minimal` for gpt-5.6-sol and accepts none/low/medium/high/xhigh/max.
+- Added a `model_fallbacks` map. Fable 5 bills the Claude subscription, so when
+  that allowance runs out every seat, profile execution model, and subagent
+  driver naming it fails at once; the map redirects the model at each read
+  point (default `claude-fable-5` -> `claude-opus-5`, provider prefixes
+  preserved) and records the swap on the receipt route and resolved preset.
+  The two invariants that pin Fable 5 now accept the declared fallback target
+  but still reject any other model.
+- Added a status line stack row: panel/judge/fuser as short model badges, the
+  subagent review level, planning mode, active fallback substitutions, and
+  running/total fusion seats read from the same panel and ledger state
+  `fusion watch` uses.
+
+## Claude Fusion Drive 0.2.0 (Claude Code edition) - 2026-08-03
+
+- Added seven first-class Claude Dynamic Workflows: `opinion`, `fusion`,
+  `auto-validate`, `debate`, `parallel`, `coordinate`, and `best-of-n`.
+  Claude's native `/workflows` view now provides phases, live agents, token
+  counts, elapsed time, drill-down, pause, stop, restart, and reusable graph
+  scripts.
+- Added durable `seat_run` graph nodes. A workflow can select a configured
+  panel, judge, fuser, or verifier seat by role/index without hardcoding a
+  model. Requested and actual model/provider/reasoning, usage, receipt hashes,
+  and artifact paths remain explicit. External seats stay tool-free; native
+  Claude workflow agents own tools, worktrees, and writes.
+- Added one profile/config-bound aggregate ledger per external workflow graph.
+  Cross-process call reservations are strict before dispatch while provider
+  calls remain parallel; tokens, cost, and approval thresholds latch later
+  nodes. Deterministic node identities preserve receipts on resume, and strict
+  proxy envelopes prevent a truthy tool-error report from reaching a fuser,
+  judge, or deliverer.
+- Added validator-first auto-validation with a required baseline RED, persisted
+  gate SHA-256, independent before/after hash checks, and bounded repair loops.
+  Parallel and coordinated writers use isolated worktrees.
+- Replaced raw pretty-printed MCP result text with concise human receipts plus
+  bounded `structuredContent`. Oversized evidence still spills to a full JSON
+  artifact. Workflow seats retain complete top-level model text without
+  duplicating response text or aggregate-ledger entries, and external graph
+  edges no longer silently slice model results. Added `job_wait` to collapse
+  repeated status/result polling into one bounded call.
+- Replaced the dense topology/status chip line with a width-aware two-line
+  Fusion Drive status view that consumes Claude's official model, effort,
+  1M-context, cost, and duration fields. Added native subagent status rows.
+  Removed binary-presence-as-authenticated claims.
+- Changed passive orchestration defaults to quiet/manual: automatic fusion-plan
+  and subagent review are off, the high preset remains available for explicit
+  workflow commands, and the external-seat watcher is opt-in.
+- Added a workflow authoring guide and skill covering graph code, external-seat
+  proxies, isolation, fail-closed gates, run controls, and the no-mid-run-human
+  boundary.
+
 ## Claude Fusion Drive 0.1.5 (Claude Code edition) - 2026-08-02
 
 Closes the last three findings from the 2026-08-01 field evaluation.

@@ -12,6 +12,11 @@ from relentless_inception.execution import build_handoff
 
 
 class McpServerSmokeTests(unittest.TestCase):
+    @staticmethod
+    def _tool_payload(response: dict) -> dict:
+        result = response.get("result", response)
+        return result["structuredContent"]
+
     def _call_execution_handoff(self, data_directory: str, run_id: str) -> tuple[dict, dict]:
         message = {
             "jsonrpc": "2.0",
@@ -39,7 +44,7 @@ class McpServerSmokeTests(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         response = json.loads(completed.stdout.strip())
-        payload = json.loads(response["result"]["content"][0]["text"])
+        payload = self._tool_payload(response)
         return response, payload
 
     @staticmethod
@@ -111,7 +116,7 @@ class McpServerSmokeTests(unittest.TestCase):
         self.assertEqual(initialize["protocolVersion"], "2025-06-18")
         self.assertEqual(
             initialize["serverInfo"],
-            {"name": "claude-fusion-drive", "version": "0.1.5"},
+            {"name": "claude-fusion-drive", "version": "0.2.1"},
         )
 
         tool_names = {tool["name"] for tool in responses[1]["result"]["tools"]}
@@ -119,8 +124,9 @@ class McpServerSmokeTests(unittest.TestCase):
 
         validation_result = responses[2]["result"]
         self.assertFalse(validation_result["isError"])
-        validation_payload = json.loads(validation_result["content"][0]["text"])
+        validation_payload = self._tool_payload(validation_result)
         self.assertEqual(validation_payload, {"errors": [], "ok": True})
+        self.assertEqual(validation_result["content"][0]["text"], "✓ config_validate · ready")
 
     def test_invalid_config_can_be_diagnosed_and_cannot_disable_run_abort(self) -> None:
         messages = [
@@ -174,13 +180,13 @@ class McpServerSmokeTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         responses = [json.loads(line) for line in completed.stdout.splitlines() if line.strip()]
-        payloads = [json.loads(response["result"]["content"][0]["text"]) for response in responses]
+        payloads = [self._tool_payload(response) for response in responses]
         self.assertFalse(responses[0]["result"]["isError"])
         self.assertFalse(payloads[0]["ok"])
         self.assertTrue(payloads[0]["errors"])
         self.assertFalse(responses[1]["result"]["isError"])
         self.assertFalse(payloads[1]["ok"])
-        self.assertEqual(payloads[1]["version"], "0.1.5")
+        self.assertEqual(payloads[1]["version"], "0.2.1")
         self.assertFalse(responses[2]["result"]["isError"])
         self.assertTrue(kill_file_created)
 

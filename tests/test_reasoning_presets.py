@@ -56,10 +56,13 @@ def test_hybrid_profile_reasoning_keeps_requested_and_effective_levels_distinct(
 
 def test_grok_fusion_drive_preset() -> None:
     preset = resolve_preset("grok-fusion-drive", load_config(include_user=False))
+    # The driver is pinned to Fable 5 at max, but the default model_fallbacks
+    # map redirects it to Opus 5 and records the swap on the resolved preset.
     assert preset["driver"] == {
         "owner": "claude_host",
-        "model": "claude-fable-5",
+        "model": "claude-opus-5",
         "reasoning": "max",
+        "model_fallback": {"from": "claude-fable-5", "to": "claude-opus-5"},
     }
     assert preset["worker_engine_name"] == "all_grok_4_5"
     assert len(preset["worker_engine"]["panel"]) == 2

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .errors import ConfigurationError
+from .fallback import resolve_model
 from .reasoning import normalize_reasoning, seat_reasoning_report
 from .util import (
     atomic_write_json,
@@ -104,6 +105,17 @@ def _required_mapping(value: Mapping[str, Any], key: str, errors: list[str]) -> 
         errors.append(f"{key} must be an object")
         return {}
     return child
+
+
+def _fable_or_fallback(config: Mapping[str, Any]) -> set[str]:
+    """Models that satisfy a rule pinning Fable 5.
+
+    The pin exists so these roles cannot be quietly downgraded. A declared
+    `model_fallbacks` entry is not a quiet downgrade, so the configured
+    substitute is accepted alongside the original.
+    """
+
+    return {"claude-fable-5", resolve_model("claude-fable-5", config)}
 
 
 def validate_config(config: Mapping[str, Any]) -> list[str]:
@@ -382,12 +394,13 @@ def validate_config(config: Mapping[str, Any]) -> list[str]:
             errors.append("profiles.xai-claude-oauth.execution must be an object")
         elif (
             execution.get("owner") != "claude_host"
-            or execution.get("model") != "claude-fable-5"
+            or execution.get("model") not in _fable_or_fallback(config)
             or execution.get("reasoning") != "xhigh"
             or execution.get("require_confirmed_plan") is not True
         ):
             errors.append(
-                "profiles.xai-claude-oauth.execution must use Claude host claude-fable-5 at xhigh after plan confirmation"
+                "profiles.xai-claude-oauth.execution must use Claude host claude-fable-5 "
+                "(or its configured model_fallbacks target) at xhigh after plan confirmation"
             )
 
     all_grok = engines.get("all_grok_4_5", {})
@@ -403,8 +416,11 @@ def validate_config(config: Mapping[str, Any]) -> list[str]:
 
     drive = presets.get("grok-fusion-drive", {})
     driver = drive.get("driver", {}) if isinstance(drive, Mapping) else {}
-    if driver.get("model") != "claude-fable-5" or driver.get("reasoning") != "max":
-        errors.append("grok-fusion-drive driver must be Claude Fable 5 at max")
+    if driver.get("model") not in _fable_or_fallback(config) or driver.get("reasoning") != "max":
+        errors.append(
+            "grok-fusion-drive driver must be Claude Fable 5 (or its configured "
+            "model_fallbacks target) at max"
+        )
     if drive.get("worker_engine") != "all_grok_4_5":
         errors.append("grok-fusion-drive workers must use all_grok_4_5")
     if drive.get("gate_set") != "approval-gates":

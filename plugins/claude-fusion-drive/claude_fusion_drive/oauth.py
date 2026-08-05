@@ -1,8 +1,10 @@
-"""Safe Claude Code and Grok CLI OAuth adapters.
+"""Safe Claude Code, Grok, and Codex CLI OAuth adapters.
 
 The adapters intentionally delegate token ownership to each CLI/keychain. API
 environment variables are removed from child processes so an API key cannot
-silently override the requested subscription OAuth path.
+silently override the requested subscription OAuth path. Stripping
+OPENAI_API_KEY matters most for Codex, which would otherwise bill a metered
+API account instead of the ChatGPT subscription the seat asked for.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from relentless_inception.types import ModelResponse, Usage
 
 from .config import load_config, runtime_dir
 from .errors import CapabilityError
+from .fallback import resolve_model
 from .reasoning import normalize_reasoning
 from .util import atomic_write_text, canonical_json, exclusive_lock, text_hash
 
@@ -37,7 +40,8 @@ ENVELOPE_FIELDS = {
     "structured_output",
     "subtype",
 }
-OAUTH_API_KEY_ENVIRONMENTS = ("ANTHROPIC_API_KEY", "XAI_API_KEY")
+OAUTH_API_KEY_ENVIRONMENTS = ("ANTHROPIC_API_KEY", "XAI_API_KEY", "OPENAI_API_KEY")
+CLI_OAUTH_TRANSPORTS = frozenset({"claude_cli_oauth", "grok_cli_oauth", "codex_cli_oauth"})
 
 
 def _safe_error(value: str, limit: int = 500) -> str:
@@ -63,6 +67,9 @@ def oauth_instructions(provider_name: str, config: Mapping[str, Any] | None = No
     elif transport == "grok_cli_oauth":
         command = f"env {unset_flags} grok"
         login = "Run /login in the interactive Grok session if the CLI reports that OAuth is not active."
+    elif transport == "codex_cli_oauth":
+        command = f"env {unset_flags} codex"
+        login = "Run `codex login` and choose Sign in with ChatGPT so the seat bills the subscription."
     else:
         raise CapabilityError(f"Provider {provider_name} is not a CLI OAuth provider")
     return {
@@ -108,6 +115,8 @@ def oauth_status(
         args = [binary, "auth", "status", "--json"]
     elif transport == "grok_cli_oauth":
         args = [binary, "models"]
+    elif transport == "codex_cli_oauth":
+        args = [binary, "login", "status"]
     else:
         raise CapabilityError(f"Provider {provider_name} is not a CLI OAuth provider")
     try:
@@ -344,6 +353,68 @@ def _extract_text(
     )
 
 
+def _codex_usage_fields(usage: Mapping[str, Any]) -> dict[str, Any]:
+    """Rename Codex's two divergent token counters onto the envelope names.
+
+    Only keys Codex actually sent are copied: `_usage` treats a present-but-
+    unparseable counter as invalid metadata, so absent stays absent.
+    """
+    mapped: dict[str, Any] = {}
+    for source, target in (
+        ("input_tokens", "input_tokens"),
+        ("output_tokens", "output_tokens"),
+        ("reasoning_output_tokens", "reasoning_tokens"),
+        ("cached_input_tokens", "cached_tokens"),
+    ):
+        if source in usage:
+            mapped[target] = usage[source]
+    return mapped
+
+
+def _codex_result(raw_output: str, last_message: str) -> tuple[str, dict[str, Any]]:
+    """Assemble a result envelope from a `codex exec --json` run.
+
+    Codex does not print one JSON document like the Claude and Grok CLIs. It
+    streams JSONL events to stdout and writes only the final assistant message
+    to `--output-last-message`, so the text and the usage/error metadata have
+    to be recombined from two places before the shared failure handling can
+    treat it like any other CLI envelope.
+    """
+    events: list[Mapping[str, Any]] = []
+    for line in raw_output.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            # Codex interleaves human-readable banner lines with the JSONL
+            # stream; a non-JSON line is not itself a failure.
+            continue
+        if isinstance(event, Mapping):
+            events.append(event)
+
+    for event in events:
+        if event.get("type") in {"error", "turn.failed"}:
+            raise _CliOutputFailure(
+                _diagnostics(raw_output, value=event, category="error_envelope", exit_status=0)
+            )
+
+    metadata: dict[str, Any] = {}
+    for event in events:
+        if event.get("type") == "turn.completed" and isinstance(event.get("usage"), Mapping):
+            metadata["usage"] = _codex_usage_fields(event["usage"])
+        elif event.get("type") == "thread.started" and event.get("thread_id"):
+            metadata["request_id"] = event["thread_id"]
+
+    text = last_message.strip()
+    if not text:
+        raise _CliOutputFailure(
+            _diagnostics(raw_output, value=last_message, category="empty_output", exit_status=0)
+        )
+    return text, metadata
+
+
 def _usage(payload: Mapping[str, Any]) -> Usage:
     raw = payload.get("usage", {})
     if not isinstance(raw, Mapping):
@@ -413,13 +484,14 @@ class SubscriptionCliAdapter:
         if not isinstance(provider, Mapping):
             raise CapabilityError(f"Seat {seat_name} references unknown provider")
         transport = provider.get("transport")
-        if transport not in {"claude_cli_oauth", "grok_cli_oauth"}:
+        if transport not in CLI_OAUTH_TRANSPORTS:
             raise CapabilityError(f"Seat {seat_name} is not a CLI OAuth seat")
         binary = shutil.which(str(provider.get("command", "")))
         if not binary:
             raise CapabilityError(f"CLI binary is unavailable for {provider_name}")
 
-        model = str(seat["model"])
+        configured_model = str(seat["model"])
+        model = resolve_model(configured_model, self.config)
         reasoning = normalize_reasoning(provider, model, str(seat.get("reasoning", "xhigh")))
         timeout = float(seat.get("timeout_seconds", provider.get("request_timeout_seconds", 1800)))
         env = os.environ.copy()
@@ -433,16 +505,28 @@ class SubscriptionCliAdapter:
         started = time.monotonic()
 
         def base_route() -> dict[str, Any]:
-            return {
+            route = {
                 "transport": transport,
                 "auth_mode": "cli_oauth_keychain",
                 "billing": "subscription",
                 "reasoning": reasoning,
-                "tools_disabled": True,
+                # Claude and Grok take an explicit empty tool list. Codex has no
+                # equivalent switch, so it is confined by sandbox instead and
+                # must not claim the stronger guarantee.
+                "tools_disabled": transport != "codex_cli_oauth",
                 "api_key_override_removed": bool(api_env),
                 "api_key_overrides_removed": list(OAUTH_API_KEY_ENVIRONMENTS),
                 "schema_name": schema_name,
             }
+            if configured_model != model:
+                # Keep the swap auditable: the receipt must not read as though
+                # the configured model actually ran.
+                route["model_fallback"] = {"from": configured_model, "to": model}
+            if transport == "codex_cli_oauth":
+                route["sandbox_policy"] = "read-only"
+                route["web_search_disabled"] = True
+                route["user_config_ignored"] = True
+            return route
 
         def record_semantic_failure(
             diagnostics: Mapping[str, Any],
@@ -473,6 +557,8 @@ class SubscriptionCliAdapter:
                 os.chmod(temporary_path, 0o700)
                 prompt_path = temporary_path / "prompt.txt"
                 atomic_write_text(prompt_path, combined_prompt, mode=0o600)
+                codex_message_path = temporary_path / "last-message.txt"
+                codex_schema_path = temporary_path / "output-schema.json"
                 if transport == "claude_cli_oauth":
                     args = [
                         binary,
@@ -490,6 +576,40 @@ class SubscriptionCliAdapter:
                     ]
                     if response_schema:
                         args.extend(["--json-schema", json.dumps(response_schema, separators=(",", ":"), sort_keys=True)])
+                    prompt_input = prompt_path.read_text(encoding="utf-8")
+                    subprocess_stdin = None
+                elif transport == "codex_cli_oauth":
+                    # --ignore-user-config keeps the seat deterministic and
+                    # immune to a broken or model-overriding ~/.codex/config.toml;
+                    # auth still resolves from CODEX_HOME.
+                    args = [
+                        binary,
+                        "exec",
+                        "--ignore-user-config",
+                        "--model",
+                        model,
+                        "-c",
+                        f"model_reasoning_effort={json.dumps(reasoning['effective'])}",
+                        "-c",
+                        "tools.web_search=false",
+                        "--sandbox",
+                        "read-only",
+                        "--skip-git-repo-check",
+                        "--ephemeral",
+                        "--json",
+                        "--output-last-message",
+                        str(codex_message_path),
+                    ]
+                    if response_schema:
+                        atomic_write_text(
+                            codex_schema_path,
+                            json.dumps(response_schema, separators=(",", ":"), sort_keys=True),
+                            mode=0o600,
+                        )
+                        args.extend(["--output-schema", str(codex_schema_path)])
+                    # "-" makes Codex read the prompt from stdin instead of argv,
+                    # keeping it out of the process table.
+                    args.append("-")
                     prompt_input = prompt_path.read_text(encoding="utf-8")
                     subprocess_stdin = None
                 else:
@@ -555,13 +675,21 @@ class SubscriptionCliAdapter:
                     raise _CliOutputFailure(diagnostics)
                 raw_output = completed.stdout or ""
                 try:
-                    payload, is_json_sequence = _decode_json_output(raw_output)
-                    text, metadata = _extract_text(
-                        payload,
-                        raw_output=raw_output,
-                        response_schema=response_schema,
-                        is_json_sequence=is_json_sequence,
-                    )
+                    if transport == "codex_cli_oauth":
+                        last_message = (
+                            codex_message_path.read_text(encoding="utf-8")
+                            if codex_message_path.exists()
+                            else ""
+                        )
+                        text, metadata = _codex_result(raw_output, last_message)
+                    else:
+                        payload, is_json_sequence = _decode_json_output(raw_output)
+                        text, metadata = _extract_text(
+                            payload,
+                            raw_output=raw_output,
+                            response_schema=response_schema,
+                            is_json_sequence=is_json_sequence,
+                        )
                 except _CliOutputFailure as exc:
                     metadata = (
                         _envelope_metadata(payload)

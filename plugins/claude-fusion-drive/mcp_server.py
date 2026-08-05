@@ -52,6 +52,7 @@ from claude_fusion_drive.jobs import (
     job_abort,
     job_result,
     job_status,
+    job_wait,
     start_approval_gate_job,
     start_fuse_job,
 )
@@ -177,6 +178,25 @@ TOOLS = [
         ["task", "idempotency_key", "confirmed_external_costs"],
     ),
     _tool(
+        "seat_run",
+        "Run one configured, tool-free external model seat as a durable workflow-graph node. Reuse one graph_run_id across every node so profile call, token, cost, and approval budgets are aggregate. Select the seat by active-profile role and index (negative indexes and explicit cycling are supported), or by an exact role-bound seat name.",
+        {
+            "task": TEXT,
+            "context": TEXT,
+            "profile": TEXT,
+            "role": {
+                "type": "string",
+                "enum": ["panel", "judge", "fuser", "verifier"],
+            },
+            "seat_index": {"type": "integer"},
+            "cycle": BOOL,
+            "seat_name": TEXT,
+            "resume_run_id": TEXT,
+            "graph_run_id": TEXT,
+        },
+        ["task"],
+    ),
+    _tool(
         "approval_gate",
         "Run Grok 4.5 approval reviewers for a named stage and optionally append a compare-and-swap lifecycle receipt.",
         {
@@ -223,6 +243,24 @@ TOOLS = [
         "job_result",
         "Return and hash-verify the completed result of a durable asynchronous job.",
         {"job_id": TEXT},
+        ["job_id"],
+    ),
+    _tool(
+        "job_wait",
+        "Wait boundedly for a durable job and return its hash-verified terminal result, reducing repeated status/result tool calls.",
+        {
+            "job_id": TEXT,
+            "timeout_seconds": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 300,
+            },
+            "poll_interval_seconds": {
+                "type": "number",
+                "minimum": 0.1,
+                "maximum": 10,
+            },
+        },
         ["job_id"],
     ),
     _tool(
@@ -523,6 +561,18 @@ def call_tool(name: str, arguments: Mapping[str, Any]) -> Any:
                 arguments["confirmed_external_costs"]
             ),
         )
+    if name == "seat_run":
+        return FusionDriveEngine().seat_run(
+            str(arguments["task"]),
+            context=str(arguments.get("context", "")),
+            profile_name=arguments.get("profile"),
+            role=str(arguments.get("role", "panel")),
+            seat_index=arguments.get("seat_index", 0),
+            cycle=bool(arguments.get("cycle", False)),
+            seat_name=arguments.get("seat_name"),
+            resume_run_id=arguments.get("resume_run_id"),
+            graph_run_id=arguments.get("graph_run_id"),
+        )
     if name == "approval_gate":
         return FusionDriveEngine().approval_gate(
             str(arguments["task"]),
@@ -556,6 +606,12 @@ def call_tool(name: str, arguments: Mapping[str, Any]) -> Any:
         return job_status(str(arguments["job_id"]))
     if name == "job_result":
         return job_result(str(arguments["job_id"]))
+    if name == "job_wait":
+        return job_wait(
+            str(arguments["job_id"]),
+            timeout_seconds=arguments.get("timeout_seconds", 55),
+            poll_interval_seconds=arguments.get("poll_interval_seconds", 1),
+        )
     if name == "job_abort":
         return job_abort(str(arguments["job_id"]))
     if name == "adversarial_gate":
@@ -846,9 +902,258 @@ def _render_json(value: Any) -> str:
     )
 
 
-def _text_result(value: Any, *, is_error: bool = False) -> dict[str, Any]:
+def _preview(value: Any, limit: int = 700) -> str:
+    text = " ".join(str(value or "").split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def _human_summary(
+    tool_name: str,
+    value: Any,
+    *,
+    is_error: bool = False,
+) -> str:
+    """Render a quiet terminal summary while structured evidence stays intact."""
+
+    if not isinstance(value, Mapping):
+        return f"{'✗' if is_error else '✓'} {tool_name} · {_preview(value)}"
+
+    error = value.get("error")
+    if is_error or value.get("ok") is False and error:
+        return f"✗ {tool_name} · {_preview(error or 'request failed', 1200)}"
+
+    if value.get("response_spilled") is True:
+        path = value.get("full_response_path", "unknown artifact")
+        size = value.get("response_chars", "?")
+        sections = value.get("section_chars", {})
+        section_names = ", ".join(sections) if isinstance(sections, Mapping) else ""
+        suffix = f" · sections: {section_names}" if section_names else ""
+        return f"✓ {tool_name} · full receipt saved to {path} ({size} chars){suffix}"
+
+    if tool_name == "seat_run":
+        response = value.get("response", {})
+        selection = value.get("selection", {})
+        graph_ledger = value.get("graph_ledger")
+        ledger = (
+            graph_ledger
+            if isinstance(graph_ledger, Mapping)
+            else value.get("ledger", {})
+        )
+        model = (
+            response.get("actual_model")
+            if isinstance(response, Mapping)
+            else None
+        ) or (
+            selection.get("requested_model")
+            if isinstance(selection, Mapping)
+            else None
+        )
+        seat_name = value.get("seat_name") or (
+            selection.get("seat_name") if isinstance(selection, Mapping) else None
+        )
+        cost = ledger.get("known_cost_usd") if isinstance(ledger, Mapping) else None
+        cost_text = f"USD {float(cost):.4f}" if isinstance(cost, (int, float)) else "cost unknown"
+        cost_scope = "graph" if isinstance(graph_ledger, Mapping) else "seat"
+        return (
+            f"✓ seat · {seat_name or 'unknown'} · {model or 'model unknown'} · "
+            f"{cost_scope} {cost_text} · artifact {value.get('artifacts_dir', 'unknown')}\n"
+            f"{_preview(value.get('text'), 1200)}"
+        )
+
+    if tool_name == "job_wait" and not isinstance(value.get("result"), Mapping):
+        job = value.get("job", {})
+        return (
+            f"◆ job · {job.get('status', 'unknown') if isinstance(job, Mapping) else 'unknown'}"
+            f" · {'wait window elapsed' if value.get('wait_timed_out') else 'terminal without result'}"
+        )
+
+    if tool_name in {"fuse", "job_result", "job_wait"}:
+        payload = value.get("result") if tool_name in {"job_result", "job_wait"} else value
+        if not isinstance(payload, Mapping):
+            payload = value
+        gate = payload.get("gate", {})
+        ledger = payload.get("ledger", {})
+        verdict = (
+            gate.get("verdict") or ("PASS" if gate.get("passed") else None)
+            if isinstance(gate, Mapping)
+            else None
+        )
+        cost = ledger.get("known_cost_usd") if isinstance(ledger, Mapping) else None
+        cost_text = f"USD {float(cost):.4f}" if isinstance(cost, (int, float)) else "cost unknown"
+        synthesis = payload.get("synthesis")
+        headline = (
+            f"✓ {tool_name} · {payload.get('status', value.get('status', 'complete'))}"
+            f" · gate {verdict or 'not reported'} · {cost_text}"
+            f" · artifact {payload.get('artifacts_dir', value.get('result_path', 'unknown'))}"
+        )
+        return headline + (f"\n{_preview(synthesis, 1400)}" if synthesis else "")
+
+    if tool_name == "job_status":
+        return (
+            f"◆ job · {value.get('status', 'unknown')} · "
+            f"{value.get('job_id', 'unknown')} · "
+            f"updated {value.get('updated_at', 'unknown')}"
+        )
+
+    if tool_name in {"approval_gate", "approval_gate_start", "adversarial_gate"}:
+        gate = value.get("gate", {})
+        verdict = value.get("verdict")
+        if not verdict and isinstance(gate, Mapping):
+            nested = gate.get("gate", gate)
+            if isinstance(nested, Mapping):
+                verdict = nested.get("verdict")
+                passed = nested.get("passed")
+                if not verdict and isinstance(passed, bool):
+                    verdict = "PASS" if passed else "FAIL"
+        return (
+            f"{'✓' if verdict == 'PASS' else '◆'} {tool_name} · "
+            f"{verdict or value.get('status', 'started')} · "
+            f"artifact {value.get('artifact_sha256', value.get('result_path', 'pending'))}"
+        )
+
+    if tool_name in {"doctor", "config_validate"}:
+        errors = value.get("errors")
+        if errors is None and isinstance(value.get("config"), Mapping):
+            errors = value["config"].get("errors")
+        error_count = len(errors) if isinstance(errors, list) else 0
+        return (
+            f"{'✓' if value.get('ok', not error_count) else '✗'} {tool_name} · "
+            f"{'ready' if not error_count else f'{error_count} error(s)'}"
+        )
+
+    if tool_name == "workflow_report":
+        validation = value.get("validation", {})
+        profile = value.get("profile") or value.get("active_profile")
+        return (
+            f"✓ workflow · {profile or 'active profile'} · "
+            f"config {str(value.get('config_hash', 'unknown'))[:12]} · "
+            f"{'valid' if not isinstance(validation, Mapping) or validation.get('ok', True) else 'invalid'}"
+        )
+
+    scalar_parts = []
+    for key in ("status", "state", "verdict", "run_id", "workflow_id", "job_id", "next_action"):
+        scalar = value.get(key)
+        if isinstance(scalar, (str, int, float, bool)) and str(scalar):
+            scalar_parts.append(f"{key}={_preview(scalar, 120)}")
+        if len(scalar_parts) == 4:
+            break
+    suffix = " · " + " · ".join(scalar_parts) if scalar_parts else ""
+    return f"✓ {tool_name}{suffix}"
+
+
+def _ledger_summary(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    fields = (
+        "schema_version",
+        "calls",
+        "attempts",
+        "input_tokens",
+        "output_tokens",
+        "reasoning_tokens",
+        "cached_tokens",
+        "total_tokens",
+        "tool_calls",
+        "known_cost_usd",
+        "provider_cost_usd",
+        "unknown_cost_calls",
+        "accounting_failure",
+        "stop_reason",
+        "wall_seconds",
+        "warnings",
+    )
+    return {field: value[field] for field in fields if field in value}
+
+
+def _workflow_seat_result(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep the complete seat text without duplicating bulky evidence lists.
+
+    A workflow's next external node needs the model's actual text. Sending the
+    full internal result would duplicate that text inside ``response`` and add
+    every aggregate-ledger entry; sending the normal spill envelope would omit
+    the text entirely. The full internal receipt remains in ``result.json`` and
+    the immutable response artifact, both exposed below.
+    """
+
+    response = value.get("response")
+    response_metadata = dict(response) if isinstance(response, Mapping) else {}
+    response_metadata.pop("text", None)
+    evidence = value.get("response_evidence")
+    evidence = dict(evidence) if isinstance(evidence, Mapping) else None
+    artifacts_dir = value.get("artifacts_dir")
+    graph_artifacts_dir = value.get("graph_artifacts_dir")
+    response_artifact_path = None
+    if isinstance(artifacts_dir, str) and evidence:
+        entry_id = evidence.get("entry_id")
+        if isinstance(entry_id, str) and entry_id:
+            response_artifact_path = str(
+                Path(artifacts_dir) / "responses" / f"{entry_id}.json"
+            )
+
     return {
-        "content": [{"type": "text", "text": _render_json(value)}],
+        "run_id": value.get("run_id"),
+        "status": value.get("status"),
+        "seat_name": value.get("seat_name"),
+        "role": value.get("role"),
+        "text": value.get("text"),
+        "response": response_metadata,
+        "response_evidence": evidence,
+        "ledger": _ledger_summary(value.get("ledger")),
+        "graph_run_id": value.get("graph_run_id"),
+        "graph_ledger": _ledger_summary(value.get("graph_ledger")),
+        "profile": value.get("profile"),
+        "engine": value.get("engine"),
+        "selection": value.get("selection"),
+        "artifacts_dir": artifacts_dir,
+        "full_result_path": (
+            str(Path(artifacts_dir) / "result.json")
+            if isinstance(artifacts_dir, str)
+            else None
+        ),
+        "response_artifact_path": response_artifact_path,
+        "graph_artifacts_dir": graph_artifacts_dir,
+        "graph_ledger_path": (
+            str(Path(graph_artifacts_dir) / "ledger.json")
+            if isinstance(graph_artifacts_dir, str)
+            else None
+        ),
+    }
+
+
+def _text_result(
+    value: Any,
+    *,
+    tool_name: str = "claude-fusion-drive",
+    is_error: bool = False,
+) -> dict[str, Any]:
+    if tool_name == "seat_run" and isinstance(value, Mapping) and not is_error:
+        # The human text is still compact, while structuredContent carries the
+        # exact external answer needed by later graph nodes. Provider output
+        # limits bound this field; the artifact paths retain the full receipt.
+        bounded_value: Any = _workflow_seat_result(value)
+    else:
+        rendered = _render_json(value)
+        try:
+            bounded_value = json.loads(rendered)
+        except json.JSONDecodeError:
+            bounded_value = {"text": rendered}
+    structured = (
+        dict(bounded_value)
+        if isinstance(bounded_value, Mapping)
+        else {"value": bounded_value}
+    )
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": _human_summary(
+                    tool_name,
+                    structured,
+                    is_error=is_error,
+                ),
+            }
+        ],
+        "structuredContent": structured,
         "isError": is_error,
     }
 
@@ -870,8 +1175,12 @@ def handle(message: Mapping[str, Any]) -> dict[str, Any] | None:
         result = {"tools": TOOLS}
     elif method == "tools/call":
         params = message.get("params", {})
+        tool_name = str(params.get("name"))
         try:
-            result = _text_result(call_tool(str(params.get("name")), _arguments(params)))
+            result = _text_result(
+                call_tool(tool_name, _arguments(params)),
+                tool_name=tool_name,
+            )
         except (
             FusionDriveError,
             RelentlessInceptionError,
@@ -882,7 +1191,11 @@ def handle(message: Mapping[str, Any]) -> dict[str, Any] | None:
             ValueError,
             json.JSONDecodeError,
         ) as exc:
-            result = _text_result({"ok": False, "error": str(exc)}, is_error=True)
+            result = _text_result(
+                {"ok": False, "error": str(exc)},
+                tool_name=tool_name,
+                is_error=True,
+            )
     elif method == "resources/list":
         result = {
             "resources": [

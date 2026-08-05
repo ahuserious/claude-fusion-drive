@@ -121,6 +121,43 @@ class BenchmarkAssetTests(unittest.TestCase):
             ],
         }
 
+    def test_validator_prefers_structured_mcp_results_with_human_summary_text(self) -> None:
+        import mcp_server
+
+        payload = {
+            "run_id": "benchmark-pre-execution",
+            "gate": {"passed": True},
+        }
+        result = mcp_server._text_result(payload, tool_name="adversarial_gate")
+        summary = result["content"][0]["text"]
+
+        self.assertFalse(summary.lstrip().startswith("{"))
+        self.assertEqual(
+            VALIDATOR.decode_mcp_result({"result": result}, "pre_execution"),
+            payload,
+        )
+
+        legacy_result = {
+            "content": [{"type": "text", "text": json.dumps(payload)}]
+        }
+        self.assertEqual(
+            VALIDATOR.decode_mcp_result(
+                {"result": legacy_result}, "pre_execution"
+            ),
+            payload,
+        )
+
+        malformed_structured_result = {
+            "structuredContent": [payload],
+            "content": [{"type": "text", "text": summary}],
+        }
+        with self.assertRaisesRegex(
+            VALIDATOR.EvidenceError, "structured result is not an object"
+        ):
+            VALIDATOR.decode_mcp_result(
+                {"result": malformed_structured_result}, "pre_execution"
+            )
+
     def test_all_immutable_pins_are_complete(self) -> None:
         self.assertEqual(PINS["harbor"]["version"], "0.20.0")
         self.assertEqual(

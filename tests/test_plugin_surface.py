@@ -17,12 +17,14 @@ def test_plugin_manifest_and_mcp_identity() -> None:
     mcp = json.loads((PLUGIN / ".mcp.json").read_text())
     assert manifest["name"] == "claude-fusion-drive"
     assert manifest["version"] == __version__
+    assert manifest["displayName"] == "Claude Fusion Drive"
     assert manifest["skills"] == "./skills/"
+    assert manifest["workflows"] == "./workflows/"
     assert set(mcp["mcpServers"]) == {"claude-fusion-drive"}
     assert mcp_server.SERVER_INFO == {"name": "claude-fusion-drive", "version": __version__}
 
 
-def test_six_required_skills_exist() -> None:
+def test_required_skills_exist() -> None:
     expected = {
         "claude-fusion-drive",
         "claude-fusion-drive-config",
@@ -30,6 +32,7 @@ def test_six_required_skills_exist() -> None:
         "claude-fusion-drive-rescue",
         "human-sim-users",
         "auto-eval",
+        "claude-fusion-workflows",
     }
     actual = {
         path.parent.name
@@ -52,10 +55,12 @@ def test_mcp_exposes_complete_control_plane() -> None:
         "preset_resolve",
         "fuse",
         "fuse_start",
+        "seat_run",
         "approval_gate",
         "approval_gate_start",
         "job_status",
         "job_result",
+        "job_wait",
         "job_abort",
         "subagent_fuse",
         "oauth_status",
@@ -77,6 +82,8 @@ def test_mcp_exposes_complete_control_plane() -> None:
     }
     assert required <= names
     assert len(names) == len(mcp_server.TOOLS)
+    seat_run = next(tool for tool in mcp_server.TOOLS if tool["name"] == "seat_run")
+    assert "graph_run_id" in seat_run["inputSchema"]["properties"]
 
 
 def test_mcp_initialize_and_tool_list_protocol() -> None:
@@ -115,7 +122,7 @@ def test_subscription_doctor_checks_binaries_and_create_thread(
         },
     )
     assert result["ok"] is True
-    assert result["version"] == "0.1.5"
+    assert result["version"] == "0.2.1"
     assert result["capabilities"]["selected_profile"] == "subscription-oauth"
     assert result["capabilities"]["providers"]["claude_oauth"]["binary_available"] == "/resolved/claude"
     assert result["capabilities"]["providers"]["grok_oauth"]["binary_available"] == "/resolved/grok"
@@ -140,7 +147,7 @@ def test_hybrid_doctor_requires_xai_env_and_has_no_openrouter_dependency(
         },
     )
     assert result["ok"] is True
-    assert result["version"] == "0.1.5"
+    assert result["version"] == "0.2.1"
     capabilities = result["capabilities"]
     assert capabilities["required_providers"] == ["claude_oauth", "xai_api"]
     assert capabilities["providers"]["claude_oauth"]["binary_available"] == "/resolved/claude"

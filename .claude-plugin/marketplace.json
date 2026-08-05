@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Claude Code-native fusion, verification gates, rescue, human simulation, and deterministic auto-evaluation.",
-    "version": "0.1.5"
+    "version": "0.2.0"
   },
   "plugins": [
     {
       "name": "claude-fusion-drive",
       "description": "Plan with fused frontier models and verify every execution gate from Claude Code.",
-      "version": "0.1.5",
+      "version": "0.2.1",
       "author": {
         "name": "DanBot",
         "url": "https://github.com/ahuserious"

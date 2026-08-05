@@ -2437,7 +2437,7 @@ def decode_mcp_result(item: dict[str, Any], stage: str) -> dict[str, Any]:
         content = result.get("content")
         require(
             isinstance(content, list) and len(content) == 1,
-            f"RI {stage} result must contain one JSON text block",
+            f"RI {stage} result must contain one text block",
         )
         block = content[0]
         require(
@@ -2448,12 +2448,16 @@ def decode_mcp_result(item: dict[str, Any], stage: str) -> dict[str, Any]:
         )
         try:
             decoded_content = json.loads(block["text"])
-        except json.JSONDecodeError as exc:
-            raise EvidenceError(f"RI {stage} result text is not JSON") from exc
-        require(
-            isinstance(decoded_content, dict),
-            f"RI {stage} result text does not decode to an object",
-        )
+        except json.JSONDecodeError:
+            require(
+                isinstance(structured, dict),
+                f"RI {stage} result text is not JSON",
+            )
+        else:
+            require(
+                isinstance(decoded_content, dict),
+                f"RI {stage} result text does not decode to an object",
+            )
     require(
         isinstance(structured, dict) or isinstance(decoded_content, dict),
         f"RI {stage} result has no decodable representation",
