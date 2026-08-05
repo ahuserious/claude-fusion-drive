@@ -701,3 +701,38 @@ def test_grok_camel_case_envelope_is_not_returned_as_the_answer(
     assert "thought" not in response.text
     assert "costUSD" not in response.text
     assert response.usage.input_tokens == 5
+
+
+def test_grok_seat_denies_tools_rather_than_passing_an_empty_allow_list(
+    isolated_runtime, monkeypatch
+) -> None:
+    """`--tools ""` is an empty ALLOW list, not a deny.
+
+    The Grok CLI leaves every built-in tool live when no allow override is
+    given, so a seat launched that way could read files and run commands while
+    its receipt still advertised tools_disabled. Only a deny rule blocks it.
+    """
+    captured = {}
+    monkeypatch.setattr("claude_fusion_drive.oauth.shutil.which", lambda _: "/usr/bin/grok")
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({"structuredOutput": {"answer": "4"}, "text": '{"answer":"4"}'}),
+            stderr="",
+        )
+
+    monkeypatch.setattr("claude_fusion_drive.oauth.subprocess.run", fake_run)
+    response = SubscriptionCliAdapter(load_config(include_user=False)).complete(
+        "grok45-oauth-panel", system="s", prompt="p"
+    )
+
+    args = captured["args"]
+    assert "--deny" in args
+    assert args[args.index("--deny") + 1] == "*"
+    # An empty allow list must never be used as the disabling mechanism again.
+    assert "--tools" not in args
+    assert "--disable-web-search" in args
+    assert "--no-subagents" in args
+    assert response.route["tools_disabled"] is True

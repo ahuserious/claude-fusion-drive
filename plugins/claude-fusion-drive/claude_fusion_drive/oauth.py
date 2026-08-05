@@ -633,8 +633,12 @@ class SubscriptionCliAdapter:
                         reasoning["effective"],
                         "--output-format",
                         "json",
-                        "--tools",
-                        "",
+                        # `--tools` is an ALLOW list, so an empty value is not a
+                        # deny — it simply sets no override and every built-in
+                        # tool stays live. Verified against the Grok CLI: only a
+                        # deny rule actually blocks execution.
+                        "--deny",
+                        "*",
                         "--no-subagents",
                         "--disable-web-search",
                         "--no-memory",
