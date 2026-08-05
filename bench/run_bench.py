@@ -39,7 +39,9 @@ def tree_sha256(root: Path) -> str:
     paths: list[Path] = []
     for path in root.rglob("*"):
         relative_parts = path.relative_to(root).parts
-        if "__pycache__" in relative_parts or path.name in {".DS_Store"}:
+        if "__pycache__" in relative_parts or ".pytest_cache" in relative_parts:
+            continue
+        if path.name in {".DS_Store"}:
             continue
         if path.suffix in {".pyc", ".pyo"}:
             continue
