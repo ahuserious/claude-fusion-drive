@@ -1,7 +1,7 @@
 {
   "name": "claude-fusion-drive",
   "displayName": "Claude Fusion Drive",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Authorable Claude workflow graphs backed by frontier-model fusion, evidence gates, rescue, and deterministic evaluation.",
   "author": {
     "name": "DanBot",

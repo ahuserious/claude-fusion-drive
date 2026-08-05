@@ -30,6 +30,10 @@ from .util import atomic_write_text, canonical_json, exclusive_lock, text_hash
 
 EMAIL_PATTERN = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
 TOKEN_PATTERN = re.compile(r"\b(?:sk|xai|oauth|bearer)[-_A-Za-z0-9.]{12,}\b", re.IGNORECASE)
+# The Grok CLI names two of these in camelCase. Omitting its spellings made
+# _is_result_envelope reject the envelope entirely, so the whole telemetry
+# payload — cost, session ids, the model's private reasoning — was canonicalised
+# and returned as if it were the seat's answer.
 ENVELOPE_FIELDS = {
     "content",
     "error",
@@ -38,8 +42,11 @@ ENVELOPE_FIELDS = {
     "response",
     "result",
     "structured_output",
+    "structuredOutput",
     "subtype",
+    "text",
 }
+STRUCTURED_OUTPUT_FIELDS = ("structured_output", "structuredOutput")
 OAUTH_API_KEY_ENVIRONMENTS = ("ANTHROPIC_API_KEY", "XAI_API_KEY", "OPENAI_API_KEY")
 CLI_OAUTH_TRANSPORTS = frozenset({"claude_cli_oauth", "grok_cli_oauth", "codex_cli_oauth"})
 
@@ -316,13 +323,16 @@ def _extract_text(
             )
         )
 
-    if response_schema is not None and "structured_output" in envelope:
-        structured_text = _canonical_model_text(envelope.get("structured_output"))
+    structured_field = next(
+        (field for field in STRUCTURED_OUTPUT_FIELDS if field in envelope), None
+    )
+    if response_schema is not None and structured_field is not None:
+        structured_text = _canonical_model_text(envelope.get(structured_field))
         if structured_text is None:
             raise _CliOutputFailure(
                 _diagnostics(
                     raw_output,
-                    value=envelope.get("structured_output"),
+                    value=envelope.get(structured_field),
                     category="null_or_empty_structured_output",
                     exit_status=0,
                 )

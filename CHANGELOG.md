@@ -1,5 +1,14 @@
 # Changelog
 
+## Claude Fusion Drive 0.2.2 (Claude Code edition) - 2026-08-05
+
+- Fixed CLI OAuth seats silently returning telemetry instead of an answer. The
+  Grok CLI names two envelope fields in camelCase (`structuredOutput`), which
+  the extractor did not recognise, so `_is_result_envelope` rejected the
+  envelope and the whole payload — cost, session ids, and the model's private
+  reasoning — was canonicalised and handed back as the seat's response. Any
+  `grok_oauth` seat was affected; direct-HTTP xAI seats were not.
+
 ## Claude Fusion Drive 0.2.1 (Claude Code edition) - 2026-08-05
 
 - Added the `codex_cli_oauth` transport and a `codex_oauth` provider, so
