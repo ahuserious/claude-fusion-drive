@@ -97,9 +97,18 @@ def test_offline_doctor_is_valid(isolated_runtime, monkeypatch) -> None:
     monkeypatch.setenv("XAI_API_KEY", "test-only-placeholder")
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-only-placeholder")
     result = mcp_server.call_tool("doctor", {"host_mcp_tools": []})
-    assert result["ok"] is True
     assert result["config"] == {"ok": True, "errors": []}
     assert result["capabilities"]["credential_policy"].startswith("This probe does not read")
+    # Overall `ok` also depends on what is installed on this machine — the
+    # shipped default profile needs the `claude` CLI, which a bare CI runner
+    # lacks. Absent binaries and unset env vars are environment facts, not
+    # configuration defects, so only the latter may fail this test.
+    readiness = result["capabilities"]["readiness"]
+    environment_shapes = ("cannot resolve command", "environment reference")
+    for issue in readiness["issues"]:
+        assert any(shape in issue for shape in environment_shapes), issue
+    if not readiness["issues"]:
+        assert result["ok"] is True
 
 
 def test_subscription_doctor_checks_binaries_and_create_thread(
