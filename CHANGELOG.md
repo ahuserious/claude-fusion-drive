@@ -22,9 +22,13 @@
   The two invariants that pin Fable 5 now accept the declared fallback target
   but still reject any other model.
 - Added a status line stack row: panel/judge/fuser as short model badges, the
-  subagent review level, planning mode, active fallback substitutions, and
+  models the subagent-review rung actually dispatches (the rung name says
+  nothing about what runs), planning mode, active fallback substitutions, and
   running/total fusion seats read from the same panel and ledger state
   `fusion watch` uses.
+- Fixed CI, which had been failing since 0.1.4: the workflow ran
+  `unittest discover` while thirteen test modules import pytest, which it
+  never installed.
 
 ## Claude Fusion Drive 0.2.0 (Claude Code edition) - 2026-08-03
 

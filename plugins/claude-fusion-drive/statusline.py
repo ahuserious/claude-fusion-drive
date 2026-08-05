@@ -385,7 +385,13 @@ MODEL_ABBREVIATIONS = {
     "gpt-5.6-terra": "terra",
 }
 
-REVIEW_LABELS = {"off": "off", "light": "light", "exaflop": "exaflop"}
+# Which seats each subagent-review rung actually dispatches. The rung name is
+# not shown: "exaflop" says nothing about what will run, so the seats are
+# resolved to their models instead and stay truthful if the seats are retargeted.
+REVIEW_RUNG_SEATS = {
+    "light": ("grok45-mini-panel", "grok45-mini-judge"),
+    "exaflop": ("grok45-xr-mini-panel", "sol-xr-mini-panel", "grok45-xr-review"),
+}
 
 
 def abbreviate_model(model: Any) -> str:
@@ -402,6 +408,29 @@ def abbreviate_model(model: Any) -> str:
     if bare in MODEL_ABBREVIATIONS:
         return MODEL_ABBREVIATIONS[bare]
     return bare[:10]
+
+
+def review_models(config: Mapping[str, Any], review: str) -> str:
+    """The distinct models the current subagent-review rung will dispatch.
+
+    Falls back to the rung name only if none of its seats are configured, so an
+    unrecognised or retargeted rung still reports something honest.
+    """
+
+    if review in {"", "off", "false", "0", "none"}:
+        return "off"
+    seats = REVIEW_RUNG_SEATS.get(review)
+    if not seats:
+        return review
+    badges: list[str] = []
+    for seat_name in seats:
+        seat = config.get("seats", {}).get(seat_name)
+        if not isinstance(seat, Mapping):
+            continue
+        badge_text = abbreviate_model(seat.get("model"))
+        if badge_text not in badges:
+            badges.append(badge_text)
+    return "·".join(badges) if badges else review
 
 
 def model_substitutions(config: Mapping[str, Any]) -> list[dict[str, str]]:
@@ -457,7 +486,7 @@ def stack_line(
     toggles = status_config.get("toggles")
     toggles = toggles if isinstance(toggles, Mapping) else {}
     review = safe_text(toggles.get("subagent_review"), "off").lower()
-    review_label = REVIEW_LABELS.get(review, "on" if review in {"true", "1"} else review)
+    review_label = review_models(config, review)
     preset = safe_text(toggles.get("preset"), "high")
     plan_on = bool(toggles.get("fusion_plan"))
 

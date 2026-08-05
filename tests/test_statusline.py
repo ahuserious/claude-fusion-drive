@@ -205,6 +205,9 @@ def stack_config() -> dict:
             "p2": {"model": "x-ai/grok-4.5"},
             "j1": {"model": "gpt-5.6-sol"},
             "f1": {"model": "claude-fable-5"},
+            "grok45-xr-mini-panel": {"model": "grok-4.5"},
+            "sol-xr-mini-panel": {"model": "gpt-5.6-sol"},
+            "grok45-xr-review": {"model": "grok-4.5"},
         },
         "subagent_presets": {},
     }
@@ -231,7 +234,8 @@ def test_stack_line_shows_every_role_and_the_subagent_config() -> None:
     assert "op5·gr4.5" in plain
     assert "judge sol" in plain
     assert "fuse fb5" in plain
-    assert "sub exaflop" in plain
+    # The rung name says nothing about what runs; the seats resolve to models.
+    assert "sub gr4.5" in plain
     assert "plan fused high" in plain
 
 
@@ -265,3 +269,24 @@ def test_active_seats_reads_inflight_ledger_rows(tmp_path: Path) -> None:
     # A judge seat never lands in panel.json; its reserved ledger row is the
     # only evidence it is in flight.
     assert by_seat["j1"]["running"] is True
+
+
+def test_review_rung_resolves_to_seat_models_not_the_rung_name() -> None:
+    statusline = load_script("statusline.py")
+    config = {
+        "seats": {
+            "grok45-xr-mini-panel": {"model": "grok-4.5"},
+            "sol-xr-mini-panel": {"model": "gpt-5.6-sol"},
+            "grok45-xr-review": {"model": "grok-4.5"},
+            "grok45-mini-panel": {"model": "grok-4.5"},
+            "grok45-mini-judge": {"model": "grok-4.5"},
+        }
+    }
+    # Duplicate models collapse, so the grok judge does not repeat the badge.
+    assert statusline.review_models(config, "exaflop") == "gr4.5·sol"
+    assert statusline.review_models(config, "light") == "gr4.5"
+    assert statusline.review_models(config, "off") == "off"
+    assert statusline.review_models(config, "") == "off"
+    # An unknown rung, or one whose seats are absent, degrades to its own name.
+    assert statusline.review_models(config, "unknown-rung") == "unknown-rung"
+    assert statusline.review_models({"seats": {}}, "exaflop") == "exaflop"
