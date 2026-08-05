@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from claude_fusion_drive.config import load_config
 from claude_fusion_drive.engine import (
     FusionDriveEngine,
@@ -27,7 +29,8 @@ def test_maximum_intelligence_translates_to_inherited_runtime() -> None:
     assert profile["fusion"]["min_live_seats"] == 3
     assert legacy["seats"]["grok45-panel"]["reasoning_effort"] == "high"
     assert legacy["seats"]["gpt56sol-panel"]["reasoning_effort"] == "xhigh"
-    assert legacy["seats"]["fable5-panel"]["model"] == "anthropic/claude-fable-5"
+    # model_fallbacks redirects the fable seat, prefix preserved.
+    assert legacy["seats"]["fable5-panel"]["model"] == "anthropic/claude-opus-5"
     assert profile["budgets"]["max_reasoning_tokens"] is None
     assert profile["budgets"]["max_wall_seconds"] is None
 
@@ -349,3 +352,128 @@ def test_approval_gate_records_lifecycle_receipt(isolated_runtime, monkeypatch) 
         "grok-4.5",
         "grok-4.5",
     ]
+
+
+def test_seat_run_resolves_role_index_and_reports_requested_route(monkeypatch) -> None:
+    captured = {}
+
+    class FakeOrchestrator:
+        def run_seat(self, task, seat_name, **kwargs):
+            captured.update({"task": task, "seat_name": seat_name, **kwargs})
+            return {
+                "run_id": "seat-run",
+                "status": "completed",
+                "text": "independent view",
+                "response": {
+                    "provider": "openrouter_api",
+                    "requested_model": "anthropic/claude-fable-5",
+                    "actual_model": "anthropic/claude-fable-5",
+                },
+                "ledger": {"calls": 1},
+                "artifacts_dir": "/tmp/seat-run",
+            }
+
+    engine = FusionDriveEngine(load_config(include_user=False))
+    monkeypatch.setattr(
+        engine,
+        "_orchestrator",
+        lambda profile_name=None: (FakeOrchestrator(), "fusion_drive"),
+    )
+
+    result = engine.seat_run(
+        "Give an independent answer",
+        profile_name="exaflop-reactor",
+        role="panel",
+        seat_index=-1,
+        graph_run_id="opinion-graph-one",
+    )
+
+    assert captured["seat_name"] == "fable5-oauth-panel"
+    assert captured["profile_name"] == "fusion_drive"
+    assert captured["graph_run_id"] == "opinion-graph-one"
+    assert captured["graph_profile_name"] == "exaflop-reactor"
+    assert captured["budget_stage"] == "panel"
+    assert result["selection"] == {
+        "role": "panel",
+        "seat_index": -1,
+        "cycled": False,
+        "seat_name": "fable5-oauth-panel",
+        "provider": "claude_oauth",
+        "transport": "claude_cli_oauth",
+        "requested_model": "claude-fable-5",
+        "requested_reasoning": "xhigh",
+        "effective_reasoning": "max",
+    }
+    assert result["text"] == "independent view"
+
+
+@pytest.mark.parametrize(
+    ("role", "expected_stage"),
+    (("panel", "panel"), ("fuser", "synthesis"), ("judge", "gate"), ("verifier", "gate")),
+)
+def test_seat_run_maps_graph_roles_to_budget_stages(
+    monkeypatch,
+    role: str,
+    expected_stage: str,
+) -> None:
+    captured = {}
+
+    class FakeOrchestrator:
+        def run_seat(self, _task, _seat_name, **kwargs):
+            captured.update(kwargs)
+            return {"run_id": "role-stage", "status": "completed", "text": "view"}
+
+    engine = FusionDriveEngine(load_config(include_user=False))
+    monkeypatch.setattr(
+        engine,
+        "_orchestrator",
+        lambda profile_name=None: (FakeOrchestrator(), "fusion_drive"),
+    )
+
+    engine.seat_run(
+        "task",
+        profile_name="exaflop-reactor",
+        role=role,
+        graph_run_id="role-stage-graph",
+    )
+
+    assert captured["budget_stage"] == expected_stage
+    assert captured["graph_run_id"] == "role-stage-graph"
+    assert captured["graph_profile_name"] == "exaflop-reactor"
+
+
+def test_seat_run_cycles_explicitly_and_refuses_out_of_range_indices(monkeypatch) -> None:
+    selected = []
+
+    class FakeOrchestrator:
+        def run_seat(self, _task, seat_name, **_kwargs):
+            selected.append(seat_name)
+            return {
+                "run_id": "seat-run",
+                "status": "completed",
+                "text": "view",
+            }
+
+    engine = FusionDriveEngine(load_config(include_user=False))
+    monkeypatch.setattr(
+        engine,
+        "_orchestrator",
+        lambda profile_name=None: (FakeOrchestrator(), "fusion_drive"),
+    )
+    engine.seat_run(
+        "task",
+        profile_name="exaflop-reactor",
+        role="panel",
+        seat_index=4,
+        cycle=True,
+    )
+    assert selected == ["sol-xr-panel-b"]
+
+    with pytest.raises(Exception, match="outside"):
+        engine.seat_run(
+            "task",
+            profile_name="exaflop-reactor",
+            role="panel",
+            seat_index=4,
+            cycle=False,
+        )

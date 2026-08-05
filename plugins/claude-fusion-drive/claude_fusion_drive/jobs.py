@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -413,6 +414,59 @@ def job_result(job_id: str) -> dict[str, Any]:
         "job": _public_manifest(manifest),
         "result": result,
     }
+
+
+def job_wait(
+    job_id: str,
+    *,
+    timeout_seconds: float = 55.0,
+    poll_interval_seconds: float = 1.0,
+) -> dict[str, Any]:
+    """Wait boundedly for one durable job and return its terminal receipt.
+
+    This collapses repeated host-side job_status calls without changing job
+    durability, cancellation, or result hash verification.
+    """
+
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, (int, float))
+        or timeout_seconds < 0
+        or timeout_seconds > 300
+    ):
+        raise ConfigurationError("timeout_seconds must be between 0 and 300")
+    if (
+        isinstance(poll_interval_seconds, bool)
+        or not isinstance(poll_interval_seconds, (int, float))
+        or poll_interval_seconds < 0.1
+        or poll_interval_seconds > 10
+    ):
+        raise ConfigurationError(
+            "poll_interval_seconds must be between 0.1 and 10"
+        )
+
+    deadline = time.monotonic() + float(timeout_seconds)
+    while True:
+        status = job_status(job_id)
+        if status["status"] == "completed":
+            return {
+                **job_result(job_id),
+                "wait_timed_out": False,
+            }
+        if status["status"] in TERMINAL_STATUSES:
+            return {
+                "job": status,
+                "result": None,
+                "wait_timed_out": False,
+            }
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return {
+                "job": status,
+                "result": None,
+                "wait_timed_out": True,
+            }
+        time.sleep(min(float(poll_interval_seconds), remaining))
 
 
 def job_abort(job_id: str) -> dict[str, Any]:

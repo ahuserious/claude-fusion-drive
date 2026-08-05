@@ -18,12 +18,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Install test dependencies
+        run: python -m pip install --quiet pytest
       - name: Compile
         run: python -m compileall -q plugins/claude-fusion-drive
       - name: Validate plugin package
         run: python -m unittest tests.test_package_integrity -v
       - name: Unit tests
-        run: python -m unittest discover -s tests -v
+        run: python -m pytest tests -q
       - name: Validate JSON syntax
         run: |
           python -m json.tool .claude-plugin/marketplace.json >/dev/null

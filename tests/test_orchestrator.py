@@ -5,8 +5,10 @@ import json
 import os
 import re
 import tempfile
+import threading
 import unittest
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Mapping
 from unittest import mock
@@ -157,6 +159,274 @@ class OrchestrationTests(unittest.TestCase):
         runs_directory = Path(self.temporary_directory.name) / "runs"
         self.assertFalse((runs_directory / "privacy-denied-fusion").exists())
         self.assertFalse((runs_directory / "privacy-denied-gate").exists())
+
+    def test_single_seat_node_is_durable_and_resume_does_not_redispatch(self) -> None:
+        registry = FakeProviderRegistry()
+        orchestrator = FusionOrchestrator(orchestration_config(), registry)
+
+        first = orchestrator.run_seat(
+            "Produce one independent implementation view.",
+            "grok45_researcher",
+            context="Keep the result evidence-led.",
+            run_id="single-seat-node",
+        )
+        resumed = orchestrator.run_seat(
+            "Produce one independent implementation view.",
+            "grok45_researcher",
+            context="Keep the result evidence-led.",
+            run_id="single-seat-node",
+        )
+
+        self.assertEqual(first["text"], FakeProviderRegistry.PANEL_TEXTS["grok45_researcher"])
+        self.assertEqual(resumed["response_evidence"], first["response_evidence"])
+        self.assertEqual(len(registry.calls), 1)
+        artifact_directory = Path(first["artifacts_dir"])
+        self.assertTrue((artifact_directory / "seat.json").is_file())
+        self.assertTrue((artifact_directory / "result.json").is_file())
+        self.assertEqual(first["ledger"]["calls"], 1)
+
+    def test_single_seat_node_fails_closed_after_a_paid_failed_attempt(self) -> None:
+        registry = FakeProviderRegistry(fail_seats={"grok45_researcher"})
+        orchestrator = FusionOrchestrator(orchestration_config(), registry)
+
+        with self.assertRaisesRegex(ProviderError, "synthetic provider failure"):
+            orchestrator.run_seat(
+                "Do not silently retry this failed paid call.",
+                "grok45_researcher",
+                run_id="failed-single-seat-node",
+            )
+        with self.assertRaisesRegex(ConfigError, "manual inspection"):
+            orchestrator.run_seat(
+                "Do not silently retry this failed paid call.",
+                "grok45_researcher",
+                run_id="failed-single-seat-node",
+            )
+        self.assertEqual(len(registry.calls), 1)
+
+    def test_graph_budget_aggregates_calls_across_independent_seat_runs(self) -> None:
+        config = orchestration_config()
+        budgets = config["profiles"]["maximum_intelligence"]["budgets"]
+        budgets["max_calls"] = 2
+        budgets["reserve_fraction_for_synthesis_and_gates"] = 0
+        registry = FakeProviderRegistry()
+        orchestrator = FusionOrchestrator(config, registry)
+
+        first = orchestrator.run_seat(
+            "Produce graph candidate one.",
+            "grok45_researcher",
+            graph_run_id="best-of-n-budget",
+            run_id="best-of-n-node-one",
+        )
+        second = orchestrator.run_seat(
+            "Produce graph candidate two.",
+            "grok45_adversary",
+            graph_run_id="best-of-n-budget",
+            run_id="best-of-n-node-two",
+        )
+        with self.assertRaisesRegex(BudgetExceeded, "Call-attempt budget of 2 exhausted"):
+            orchestrator.run_seat(
+                "Produce graph candidate three.",
+                "grok45_constraint_auditor",
+                graph_run_id="best-of-n-budget",
+                run_id="best-of-n-node-three",
+            )
+
+        self.assertEqual(len(registry.calls), 2)
+        self.assertEqual(first["graph_run_id"], "best-of-n-budget")
+        self.assertEqual(second["graph_ledger"]["calls"], 2)
+        graph_directory = Path(second["graph_artifacts_dir"])
+        graph_ledger = json.loads(
+            (graph_directory / "ledger.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(graph_ledger["calls"], 2)
+        self.assertEqual(len(graph_ledger["entries"]), 2)
+        self.assertEqual(
+            [entry["seat"] for entry in graph_ledger["entries"]],
+            ["grok45_researcher", "grok45_adversary"],
+        )
+        for entry in graph_ledger["entries"]:
+            self.assertTrue((graph_directory / entry["response_artifact"]).is_file())
+
+    def test_graph_seat_identity_resumes_without_redispatch(self) -> None:
+        registry = FakeProviderRegistry()
+        orchestrator = FusionOrchestrator(orchestration_config(), registry)
+
+        first = orchestrator.run_seat(
+            "A graph node must have stable durable identity.",
+            "grok45_researcher",
+            graph_run_id="stable-node-graph",
+        )
+        resumed = orchestrator.run_seat(
+            "A graph node must have stable durable identity.",
+            "grok45_researcher",
+            graph_run_id="stable-node-graph",
+        )
+
+        self.assertEqual(first["run_id"], resumed["run_id"])
+        self.assertEqual(first["response_evidence"], resumed["response_evidence"])
+        self.assertEqual(len(registry.calls), 1)
+        self.assertEqual(resumed["graph_ledger"]["calls"], 1)
+
+    def test_graph_run_id_validation_happens_before_dispatch(self) -> None:
+        registry = FakeProviderRegistry()
+        orchestrator = FusionOrchestrator(orchestration_config(), registry)
+
+        for invalid_graph_run_id in ("", "contains spaces", "../escape", 17):
+            with self.subTest(graph_run_id=invalid_graph_run_id):
+                with self.assertRaisesRegex(ConfigError, "graph_run_id"):
+                    orchestrator.run_seat(
+                        "Reject an invalid aggregate-ledger identifier.",
+                        "grok45_researcher",
+                        graph_run_id=invalid_graph_run_id,  # type: ignore[arg-type]
+                    )
+        self.assertEqual(registry.calls, [])
+
+    def test_graph_budget_aggregates_token_cost_and_approval_thresholds(self) -> None:
+        threshold_cases = (
+            ("tokens", {"max_total_tokens": 15}, "Total token threshold of 15 exhausted"),
+            ("cost", {"max_cost_usd": 0.001}, "Known cost threshold of \\$0.00 exhausted"),
+        )
+        for label, overrides, expected_error in threshold_cases:
+            with self.subTest(limit=label):
+                config = orchestration_config()
+                budgets = config["profiles"]["maximum_intelligence"]["budgets"]
+                budgets.update(overrides)
+                budgets["reserve_fraction_for_synthesis_and_gates"] = 0
+                registry = FakeProviderRegistry()
+                orchestrator = FusionOrchestrator(config, registry)
+                graph_run_id = f"aggregate-{label}"
+                orchestrator.run_seat(
+                    f"Consume the first {label} allowance.",
+                    "grok45_researcher",
+                    graph_run_id=graph_run_id,
+                    run_id=f"aggregate-{label}-one",
+                )
+                with self.assertRaisesRegex(BudgetExceeded, expected_error):
+                    orchestrator.run_seat(
+                        f"Do not reset the {label} allowance.",
+                        "grok45_adversary",
+                        graph_run_id=graph_run_id,
+                        run_id=f"aggregate-{label}-two",
+                    )
+                self.assertEqual(len(registry.calls), 1)
+
+        approval_config = orchestration_config()
+        approval_budgets = approval_config["profiles"]["maximum_intelligence"]["budgets"]
+        approval_budgets.update(
+            {
+                "enforcement": "approval_then_hard_stop",
+                "approval_threshold_usd": 0.001,
+                "reserve_fraction_for_synthesis_and_gates": 0,
+            }
+        )
+        approval_registry = FakeProviderRegistry()
+        approval_orchestrator = FusionOrchestrator(approval_config, approval_registry)
+        with self.assertRaisesRegex(BudgetExceeded, "approval threshold"):
+            approval_orchestrator.run_seat(
+                "Reach the aggregate approval threshold.",
+                "grok45_researcher",
+                graph_run_id="aggregate-approval",
+                run_id="aggregate-approval-one",
+            )
+        with self.assertRaisesRegex(BudgetExceeded, "approval threshold"):
+            approval_orchestrator.run_seat(
+                "Do not reset the aggregate approval threshold.",
+                "grok45_adversary",
+                graph_run_id="aggregate-approval",
+                run_id="aggregate-approval-two",
+            )
+        self.assertEqual(len(approval_registry.calls), 1)
+
+    def test_graph_budget_reservation_is_cross_thread_cas_safe(self) -> None:
+        first_attempt_reserved = threading.Event()
+        release_first_response = threading.Event()
+
+        class PausingRegistry(FakeProviderRegistry):
+            def complete(self, seat_name: str, **kwargs: Any):
+                before_attempt = kwargs.pop("before_attempt")
+                if before_attempt is None:
+                    raise AssertionError("Graph budget test requires reservation callback")
+                before_attempt()
+                first_attempt_reserved.set()
+                if not release_first_response.wait(timeout=5):
+                    raise AssertionError("Timed out waiting to release provider response")
+                return super().complete(seat_name, before_attempt=None, **kwargs)
+
+        config = orchestration_config()
+        budgets = config["profiles"]["maximum_intelligence"]["budgets"]
+        budgets["max_calls"] = 1
+        budgets["reserve_fraction_for_synthesis_and_gates"] = 0
+        registry = PausingRegistry()
+        orchestrator = FusionOrchestrator(config, registry)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first_future = executor.submit(
+                orchestrator.run_seat,
+                "Reserve the only graph attempt.",
+                "grok45_researcher",
+                graph_run_id="concurrent-graph-budget",
+                run_id="concurrent-node-one",
+            )
+            self.assertTrue(first_attempt_reserved.wait(timeout=5))
+            second_future = executor.submit(
+                orchestrator.run_seat,
+                "Attempt to overbook the graph.",
+                "grok45_adversary",
+                graph_run_id="concurrent-graph-budget",
+                run_id="concurrent-node-two",
+            )
+            with self.assertRaisesRegex(BudgetExceeded, "Call-attempt budget of 1 exhausted"):
+                second_future.result(timeout=5)
+            release_first_response.set()
+            first_result = first_future.result(timeout=5)
+
+        self.assertEqual(len(registry.calls), 1)
+        self.assertEqual(first_result["graph_ledger"]["calls"], 1)
+        self.assertEqual(len(first_result["graph_ledger"]["entries"]), 1)
+
+    def test_graph_budget_id_reuse_under_changed_config_fails_closed(self) -> None:
+        initial_config = orchestration_config()
+        initial_config["profiles"]["maximum_intelligence"]["budgets"][
+            "reserve_fraction_for_synthesis_and_gates"
+        ] = 0
+        initial_registry = FakeProviderRegistry()
+        FusionOrchestrator(initial_config, initial_registry).run_seat(
+            "Create the bound graph ledger.",
+            "grok45_researcher",
+            graph_run_id="config-bound-graph",
+            run_id="config-bound-node-one",
+        )
+
+        changed_config = copy.deepcopy(initial_config)
+        changed_config["profiles"]["maximum_intelligence"]["budgets"]["max_calls"] -= 1
+        changed_registry = FakeProviderRegistry()
+        with self.assertRaisesRegex(ConfigError, "task/config/input hash"):
+            FusionOrchestrator(changed_config, changed_registry).run_seat(
+                "A changed config must not inherit or reset the graph ledger.",
+                "grok45_adversary",
+                graph_run_id="config-bound-graph",
+                run_id="config-bound-node-two",
+            )
+        self.assertEqual(changed_registry.calls, [])
+
+        profile_registry = FakeProviderRegistry()
+        profile_orchestrator = FusionOrchestrator(initial_config, profile_registry)
+        profile_orchestrator.run_seat(
+            "Bind a graph ledger to the caller-visible profile.",
+            "grok45_researcher",
+            graph_run_id="profile-bound-graph",
+            graph_profile_name="profile-alpha",
+            run_id="profile-bound-node-one",
+        )
+        with self.assertRaisesRegex(ConfigError, "task/config/input hash"):
+            profile_orchestrator.run_seat(
+                "A different profile must not inherit the graph ledger.",
+                "grok45_adversary",
+                graph_run_id="profile-bound-graph",
+                graph_profile_name="profile-beta",
+                run_id="profile-bound-node-two",
+            )
+        self.assertEqual(len(profile_registry.calls), 1)
 
     def test_runtime_rejects_duplicate_or_overlapping_independent_seats_before_dispatch(self) -> None:
         duplicate_panel_config = orchestration_config(

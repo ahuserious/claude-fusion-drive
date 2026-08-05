@@ -107,6 +107,117 @@ def test_a_failed_spill_still_returns_the_full_payload(monkeypatch: pytest.Monke
     assert json.loads(mcp_server._render_json(payload)) == payload
 
 
+def test_tool_results_use_human_text_and_machine_structured_content() -> None:
+    result = mcp_server._text_result(
+        {"ok": True, "errors": []},
+        tool_name="config_validate",
+    )
+
+    assert result["content"] == [
+        {"type": "text", "text": "✓ config_validate · ready"}
+    ]
+    assert result["structuredContent"] == {"ok": True, "errors": []}
+    assert result["isError"] is False
+
+
+@pytest.mark.parametrize("status", ["queued", "pending"])
+def test_pending_approval_gate_summary_does_not_invent_a_failed_verdict(
+    status: str,
+) -> None:
+    result = mcp_server._text_result(
+        {"job_id": "job-gate", "status": status},
+        tool_name="approval_gate_start",
+    )
+
+    assert result["content"] == [
+        {
+            "type": "text",
+            "text": f"◆ approval_gate_start · {status} · artifact pending",
+        }
+    ]
+    assert "FAIL" not in result["content"][0]["text"]
+
+
+def test_oversized_tool_result_shows_a_quiet_artifact_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        mcp_server,
+        "reporting_flags",
+        lambda *a, **k: {"max_inline_response_chars": 500},
+    )
+    result = mcp_server._text_result(
+        {"synthesis": "x" * 4000, "panel": ["y" * 2000]},
+        tool_name="job_result",
+    )
+
+    assert result["structuredContent"]["response_spilled"] is True
+    assert "full receipt saved to" in result["content"][0]["text"]
+    summary = result["content"][0]["text"]
+    assert "synthesis" in summary
+    assert "panel" in summary
+    assert not result["content"][0]["text"].lstrip().startswith("{")
+
+
+def test_workflow_seat_keeps_full_text_without_duplicate_internal_receipts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        mcp_server,
+        "reporting_flags",
+        lambda *a, **k: {"max_inline_response_chars": 500},
+    )
+    model_text = "independent evidence\n" * 2000
+    ledger = {
+        "schema_version": 3,
+        "calls": 2,
+        "attempts": 2,
+        "total_tokens": 1234,
+        "known_cost_usd": 0.25,
+        "entries": [{"large": "duplicate evidence" * 500}],
+        "attempt_entries": [{"large": "duplicate attempts" * 500}],
+        "warnings": [],
+    }
+    result = mcp_server._text_result(
+        {
+            "run_id": "seat-run",
+            "status": "completed",
+            "seat_name": "panel-a",
+            "role": "analyst",
+            "text": model_text,
+            "response": {
+                "text": model_text,
+                "provider": "provider-a",
+                "requested_model": "model-a",
+                "actual_model": "model-a",
+                "usage": {"input_tokens": 100, "output_tokens": 200},
+            },
+            "response_evidence": {"entry_id": "entry-a", "response_sha256": "a" * 64},
+            "ledger": ledger,
+            "graph_run_id": "fusion-graph-a",
+            "graph_ledger": ledger,
+            "artifacts_dir": "/private/seat-run",
+            "graph_artifacts_dir": "/private/graph-run",
+            "profile": "profile-a",
+            "engine": "engine-a",
+            "selection": {"role": "panel", "seat_name": "panel-a"},
+        },
+        tool_name="seat_run",
+    )
+
+    structured = result["structuredContent"]
+    assert structured["text"] == model_text
+    assert "text" not in structured["response"]
+    assert "entries" not in structured["ledger"]
+    assert "attempt_entries" not in structured["graph_ledger"]
+    assert structured["full_result_path"] == "/private/seat-run/result.json"
+    assert structured["response_artifact_path"] == "/private/seat-run/responses/entry-a.json"
+    assert structured["graph_ledger_path"] == "/private/graph-run/ledger.json"
+    assert structured.get("response_spilled") is not True
+    assert not result["content"][0]["text"].lstrip().startswith("{")
+    assert len(result["content"][0]["text"]) < 1500
+
+
 def test_dotted_path_proposals_are_rejected_instead_of_silently_landing() -> None:
     from claude_fusion_drive.config import propose_config
     from claude_fusion_drive.errors import ConfigurationError

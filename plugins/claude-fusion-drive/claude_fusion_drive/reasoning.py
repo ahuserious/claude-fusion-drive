@@ -42,6 +42,17 @@ def normalize_reasoning(provider: Mapping[str, Any], model: str, requested: str)
             "detail": "Claude Code exposes max rather than xhigh for its highest CLI effort.",
         }
 
+    if transport == "codex_cli_oauth":
+        # Verified against codex-cli 0.144.5: the API rejects "minimal" for
+        # gpt-5.6-sol and names its supported set none/low/medium/high/xhigh/max.
+        effective = {"minimal": "low", "ultra": "max"}.get(requested, requested)
+        return {
+            "requested": requested,
+            "effective": effective,
+            "normalization": "provider_ceiling" if effective != requested else "identity",
+            "detail": "Codex accepts none, low, medium, high, xhigh, and max; minimal is rejected upstream.",
+        }
+
     if transport == "claude_host":
         effective = requested
         return {

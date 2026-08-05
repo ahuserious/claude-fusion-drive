@@ -98,7 +98,7 @@ def save_slots(slots: dict[str, str]) -> None:
     save_statusline_config(data)
 
 
-DEFAULT_TOGGLES = {"fusion_plan": True, "preset": "high", "subagent_review": "light"}
+DEFAULT_TOGGLES = {"fusion_plan": False, "preset": "high", "subagent_review": "off"}
 
 
 def load_toggles() -> dict:

@@ -186,6 +186,109 @@ def test_worker_completion_and_result_hash_validation(
         jobs.job_result(started["job_id"])
 
 
+def test_job_wait_collapses_polling_and_returns_verified_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    statuses = iter(
+        [
+            {"job_id": "job-test", "status": "queued"},
+            {"job_id": "job-test", "status": "running"},
+            {"job_id": "job-test", "status": "completed"},
+        ]
+    )
+    monkeypatch.setattr(jobs, "job_status", lambda _job_id: next(statuses))
+    monkeypatch.setattr(
+        jobs,
+        "job_result",
+        lambda _job_id: {
+            "job": {"job_id": "job-test", "status": "completed"},
+            "result": {"synthesis": "verified"},
+        },
+    )
+    monkeypatch.setattr(jobs.time, "sleep", lambda _seconds: None)
+
+    result = jobs.job_wait(
+        "job-test",
+        timeout_seconds=5,
+        poll_interval_seconds=0.1,
+    )
+
+    assert result["wait_timed_out"] is False
+    assert result["result"]["synthesis"] == "verified"
+
+
+def test_job_wait_returns_a_nonterminal_receipt_when_window_elapses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        jobs,
+        "job_status",
+        lambda _job_id: {"job_id": "job-test", "status": "running"},
+    )
+
+    result = jobs.job_wait("job-test", timeout_seconds=0)
+
+    assert result == {
+        "job": {"job_id": "job-test", "status": "running"},
+        "result": None,
+        "wait_timed_out": True,
+    }
+
+
+@pytest.mark.parametrize("terminal_status", ["failed", "aborted"])
+def test_job_wait_returns_terminal_failure_without_requesting_a_result(
+    monkeypatch: pytest.MonkeyPatch,
+    terminal_status: str,
+) -> None:
+    terminal_job = {"job_id": "job-test", "status": terminal_status}
+    monkeypatch.setattr(jobs, "job_status", lambda _job_id: terminal_job)
+
+    def forbidden_job_result(_job_id: str) -> dict:
+        raise AssertionError("a failed or aborted job has no result to retrieve")
+
+    monkeypatch.setattr(jobs, "job_result", forbidden_job_result)
+
+    result = jobs.job_wait("job-test", timeout_seconds=1)
+
+    assert result == {
+        "job": terminal_job,
+        "result": None,
+        "wait_timed_out": False,
+    }
+
+
+@pytest.mark.parametrize(
+    ("keyword", "value", "message"),
+    [
+        ("timeout_seconds", -0.1, "timeout_seconds must be between 0 and 300"),
+        ("timeout_seconds", 301, "timeout_seconds must be between 0 and 300"),
+        ("timeout_seconds", True, "timeout_seconds must be between 0 and 300"),
+        (
+            "poll_interval_seconds",
+            0.09,
+            "poll_interval_seconds must be between 0.1 and 10",
+        ),
+        (
+            "poll_interval_seconds",
+            10.1,
+            "poll_interval_seconds must be between 0.1 and 10",
+        ),
+        (
+            "poll_interval_seconds",
+            False,
+            "poll_interval_seconds must be between 0.1 and 10",
+        ),
+    ],
+)
+def test_job_wait_rejects_invalid_bounds(
+    keyword: str,
+    value: object,
+    message: str,
+) -> None:
+    with pytest.raises(ConfigurationError, match=message):
+        jobs.job_wait("job-test", **{keyword: value})
+
+
 def test_approval_gate_worker_preserves_stage_and_resume_run_id(
     isolated_runtime,
     monkeypatch: pytest.MonkeyPatch,

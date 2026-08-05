@@ -114,6 +114,14 @@
     },
     "reporting": {
       "type": "object"
+    },
+    "model_fallbacks": {
+      "type": "object",
+      "description": "Model slug -> replacement slug, applied to seats, profile execution models, and subagent drivers when the configured model is unavailable.",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
     }
   },
   "$defs": {
@@ -140,6 +148,7 @@
             "anthropic_messages",
             "grok_cli_oauth",
             "claude_cli_oauth",
+            "codex_cli_oauth",
             "claude_host"
           ]
         },

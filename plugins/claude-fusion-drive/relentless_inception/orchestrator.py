@@ -7,6 +7,7 @@ import math
 import random
 import re
 import string
+import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -48,6 +49,7 @@ JUDGE_SCHEMA = _load_schema("judge.schema.json")
 VERDICT_SCHEMA = _load_schema("verdict.schema.json")
 JUDGE_FIELDS = tuple(JUDGE_SCHEMA["required"])
 VERDICT_FIELDS = tuple(VERDICT_SCHEMA["required"])
+GRAPH_RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,127}")
 MODEL_RESPONSE_FIELDS = (
     "text",
     "provider",
@@ -1332,6 +1334,172 @@ def _gate_result_from_reviews(
     }
 
 
+class _GraphBudgetLedger:
+    """Cross-process aggregate accounting for independently dispatched graph seats.
+
+    Dynamic Workflow proxy agents invoke ``seat_run`` in separate MCP processes.
+    Each seat therefore retains its own RunStore, while this short-lived shared
+    transaction layer serializes only budget reservation and response accounting.
+    The provider call itself remains parallel.
+    """
+
+    _LEASE_WAIT_SECONDS = 10.0
+    _LEASE_RETRY_SECONDS = 0.01
+
+    def __init__(
+        self,
+        graph_run_id: str,
+        config: Mapping[str, Any],
+        profile_name: str,
+        budget_config: Mapping[str, Any],
+    ) -> None:
+        if not isinstance(graph_run_id, str):
+            raise ConfigError("graph_run_id must be a string")
+        normalized_graph_run_id = graph_run_id.strip()
+        if GRAPH_RUN_ID_PATTERN.fullmatch(normalized_graph_run_id) is None:
+            raise ConfigError(
+                "graph_run_id must match [A-Za-z0-9][A-Za-z0-9-]{0,127}"
+            )
+        self.graph_run_id = normalized_graph_run_id
+        self.config = config
+        self.profile_name = profile_name
+        self.budget_config = dict(budget_config)
+        self.budget_config_sha256 = canonical_json_hash(self.budget_config)
+        self.run_id = f"graph-budget-{text_hash(self.graph_run_id)[:32]}"
+        self.task = f"Aggregate budget ledger for graph {self.graph_run_id}"
+        self.input_identity = {
+            "operation": "graph_budget",
+            "graph_run_id": self.graph_run_id,
+            "profile_name": self.profile_name,
+            "budget_config_sha256": self.budget_config_sha256,
+        }
+        self._live_reserved_attempt_ids: set[str] = set()
+
+    def _open_store(self) -> RunStore:
+        deadline = time.monotonic() + self._LEASE_WAIT_SECONDS
+        while True:
+            try:
+                store = RunStore(
+                    self.task,
+                    self.config,
+                    self.run_id,
+                    input_identity=self.input_identity,
+                )
+            except ConfigError as exc:
+                if (
+                    "already active; concurrent resume refused" not in str(exc)
+                    or time.monotonic() >= deadline
+                ):
+                    raise
+                time.sleep(self._LEASE_RETRY_SECONDS)
+                continue
+
+            try:
+                identity = {
+                    "graph_run_id": self.graph_run_id,
+                    "profile_name": self.profile_name,
+                    "budget_config_sha256": self.budget_config_sha256,
+                }
+                if store.exists("graph.json"):
+                    if store.read_json("graph.json") != identity:
+                        raise ConfigError(
+                            "Graph budget identity mismatch; dispatch refused"
+                        )
+                else:
+                    store.write_json("graph.json", identity)
+                return store
+            except BaseException:
+                store.close()
+                raise
+
+    def _load_budget(self, store: RunStore) -> BudgetTracker:
+        budget = BudgetTracker(self.budget_config)
+        if store.exists("ledger.json"):
+            budget.restore(store.read_json("ledger.json"))
+        return budget
+
+    def reserve_attempt(
+        self,
+        stage: str,
+        seat_name: str,
+        invocation_sha256: str,
+    ) -> Dict[str, Any]:
+        with self._open_store() as store:
+            store.check_kill()
+            budget = self._load_budget(store)
+            try:
+                recorded_attempt_ids = {
+                    str(entry["attempt_id"]) for entry in budget.entries
+                }
+                orphaned_attempts = [
+                    entry
+                    for entry in budget.attempt_entries
+                    if entry["invocation_sha256"] == invocation_sha256
+                    and entry["attempt_id"] not in recorded_attempt_ids
+                    and entry["attempt_id"] not in self._live_reserved_attempt_ids
+                ]
+                if orphaned_attempts:
+                    raise ConfigError(
+                        "Persisted graph attempt evidence exists without a recorded response; "
+                        "manual inspection is required before any redispatch"
+                    )
+                attempt = budget.reserve_call(
+                    stage,
+                    seat_name,
+                    invocation_sha256=invocation_sha256,
+                )
+                self._live_reserved_attempt_ids.add(str(attempt["attempt_id"]))
+            finally:
+                # A stop latch or consumed reservation must survive rejection.
+                store.write_budget_snapshot(budget)
+            return attempt
+
+    def record_response(
+        self,
+        stage: str,
+        seat_name: str,
+        invocation: Mapping[str, Any],
+        attempt: Mapping[str, Any],
+        response: ModelResponse,
+    ) -> Dict[str, Any]:
+        invocation_sha256 = canonical_json_hash(invocation)
+        with self._open_store() as store:
+            store.check_kill()
+            budget = self._load_budget(store)
+            response_dict = response.to_dict()
+            evidence = _response_evidence(
+                str(attempt["attempt_id"]),
+                invocation_sha256,
+                response_dict,
+            )
+            response_artifact_name = _response_artifact_name(evidence)
+            store.write_json(
+                response_artifact_name,
+                _response_artifact_payload(invocation, evidence, response_dict),
+            )
+            try:
+                budget.record(
+                    stage,
+                    seat_name,
+                    response,
+                    attempt_index=int(attempt["attempt_index"]),
+                    attempt_id=str(attempt["attempt_id"]),
+                    invocation_sha256=invocation_sha256,
+                    response_sha256=str(evidence["response_sha256"]),
+                    response_artifact=response_artifact_name,
+                )
+            finally:
+                # Threshold failures happen after the response is billable.
+                store.write_budget_snapshot(budget)
+            return evidence
+
+    def snapshot(self) -> Tuple[Dict[str, Any], str]:
+        with self._open_store() as store:
+            if not store.exists("ledger.json"):
+                raise ConfigError("Graph budget ledger is missing")
+            return store.read_json("ledger.json"), str(store.directory)
+
+
 class FusionOrchestrator:
     def __init__(self, config: Optional[Mapping[str, Any]] = None, registry: Optional[ProviderRegistry] = None) -> None:
         self.config = dict(config) if config is not None else load_config()
@@ -1366,6 +1534,7 @@ class FusionOrchestrator:
         prompt: str,
         response_schema: Optional[Mapping[str, Any]] = None,
         schema_name: str = "structured_response",
+        graph_budget: Optional[_GraphBudgetLedger] = None,
     ) -> Tuple[ModelResponse, Dict[str, Any]]:
         store.check_kill()
         invocation = _invocation_payload(
@@ -1379,9 +1548,20 @@ class FusionOrchestrator:
         )
         invocation_sha256 = canonical_json_hash(invocation)
         current_attempt: Optional[Dict[str, Any]] = None
+        current_graph_attempt: Optional[Dict[str, Any]] = None
 
         def reserve_and_persist_attempt() -> None:
-            nonlocal current_attempt
+            nonlocal current_attempt, current_graph_attempt
+            if graph_budget is not None:
+                # Reserve graph-wide capacity first. If the local persistence
+                # that follows fails, the aggregate attempt remains consumed;
+                # this conservative ordering can overcount but cannot silently
+                # permit an unaccounted provider dispatch.
+                current_graph_attempt = graph_budget.reserve_attempt(
+                    stage,
+                    seat_name,
+                    invocation_sha256,
+                )
             current_attempt = budget.reserve_call(
                 stage,
                 seat_name,
@@ -1399,6 +1579,25 @@ class FusionOrchestrator:
                 raise ConfigError(
                     f"Provider returned a response for {seat_name!r} without reserving an attempt"
                 )
+            graph_accounting_error: Optional[BaseException] = None
+            if graph_budget is not None:
+                if current_graph_attempt is None:
+                    raise ConfigError(
+                        f"Provider returned a response for {seat_name!r} without a graph reservation"
+                    )
+                try:
+                    graph_budget.record_response(
+                        stage,
+                        seat_name,
+                        invocation,
+                        current_graph_attempt,
+                        response,
+                    )
+                except BaseException as exc:
+                    # Continue into the per-seat receipt path even when the
+                    # graph response crosses a hard limit. Both ledgers must
+                    # retain the already-billable response before it is raised.
+                    graph_accounting_error = exc
             response_dict = response.to_dict()
             evidence = _response_evidence(
                 str(current_attempt["attempt_id"]),
@@ -1415,6 +1614,7 @@ class FusionOrchestrator:
                 response_artifact_name,
                 response_artifact,
             )
+            local_accounting_error: Optional[BaseException] = None
             try:
                 budget.record(
                     stage,
@@ -1426,10 +1626,16 @@ class FusionOrchestrator:
                     response_sha256=str(evidence["response_sha256"]),
                     response_artifact=response_artifact_name,
                 )
+            except BaseException as exc:
+                local_accounting_error = exc
             finally:
                 # An over-threshold response is already billable evidence.
                 # Persist its usage and stop latch even when record() fails.
                 store.write_budget_snapshot(budget)
+            if graph_accounting_error is not None:
+                raise graph_accounting_error
+            if local_accounting_error is not None:
+                raise local_accounting_error
             return evidence
 
         response = self.registry.complete(
@@ -1444,6 +1650,204 @@ class FusionOrchestrator:
         evidence = persist_and_record_response(response)
         store.check_kill()
         return response, evidence
+
+    def run_seat(
+        self,
+        task: str,
+        seat_name: str,
+        *,
+        context: str = "",
+        profile_name: Optional[str] = None,
+        run_id: Optional[str] = None,
+        graph_run_id: Optional[str] = None,
+        graph_profile_name: Optional[str] = None,
+        budget_stage: str = "panel",
+    ) -> Dict[str, Any]:
+        """Run one configured external seat with durable accounting evidence.
+
+        This is the graph-node primitive used by Claude Dynamic Workflows.  It
+        deliberately keeps the provider tool-free: workflow agents own tools
+        and workspace writes, while the external seat contributes a bounded,
+        attributable reasoning result.
+        """
+
+        if not task.strip():
+            raise ConfigError("Seat task must not be empty")
+        if not seat_name.strip():
+            raise ConfigError("Seat name must not be empty")
+        if budget_stage not in {"panel", "synthesis", "gate"}:
+            raise ConfigError("budget_stage must be one of: panel, synthesis, gate")
+
+        profile = active_profile(self.config, profile_name)
+        self._assert_external_provider_access(profile)
+        selected_profile_name = str(
+            profile_name or self.config.get("active_profile", "")
+        )
+        self._bind_selected_profile(selected_profile_name)
+        seat = self._seat_config(seat_name)
+        if seat.get("enabled", True) is not True:
+            raise ConfigError(f"Seat is disabled: {seat_name}")
+
+        graph_budget = (
+            _GraphBudgetLedger(
+                graph_run_id,
+                self.config,
+                graph_profile_name or selected_profile_name,
+                profile.get("budgets", {}),
+            )
+            if graph_run_id is not None
+            else None
+        )
+        if graph_budget is not None:
+            graph_run_id = graph_budget.graph_run_id
+            if run_id is None:
+                node_identity = {
+                    "operation": "seat_run",
+                    "task": task,
+                    "context": context,
+                    "profile_name": selected_profile_name,
+                    "seat_name": seat_name,
+                    "graph_run_id": graph_run_id,
+                    "graph_profile_name": graph_profile_name or selected_profile_name,
+                    "budget_stage": budget_stage,
+                }
+                run_id = f"graph-seat-{canonical_json_hash(node_identity)[:32]}"
+        store = RunStore(
+            task,
+            self.config,
+            run_id,
+            input_identity={
+                "operation": "seat_run",
+                "task": task,
+                "context": context,
+                "profile_name": selected_profile_name,
+                "seat_name": seat_name,
+                "graph_run_id": graph_run_id,
+                "graph_profile_name": graph_profile_name or selected_profile_name,
+                "budget_stage": budget_stage,
+            },
+        )
+        budget = BudgetTracker(profile.get("budgets", {}))
+        accounting_initialized = False
+        try:
+            if store.exists("ledger.json"):
+                budget.restore(store.read_json("ledger.json"))
+            accounting_initialized = True
+            store.check_kill()
+
+            role = str(seat.get("role", "domain analyst"))
+            system = panel_system(
+                role,
+                str(
+                    seat.get(
+                        "persona",
+                        "Find the most important truth other reviewers may miss.",
+                    )
+                ),
+                str(
+                    profile.get(
+                        "objective",
+                        "Deliver the most correct, complete, and executable result.",
+                    )
+                ),
+            )
+            prompt = panel_prompt(task, context)
+            invocation = _invocation_payload(
+                store,
+                budget_stage,
+                seat_name,
+                system,
+                prompt,
+                None,
+                "structured_response",
+            )
+
+            if store.exists("seat.json"):
+                artifact = store.read_json("seat.json")
+                expected_fields = {
+                    "seat_name",
+                    "role",
+                    "response",
+                    "response_evidence",
+                    "invocation_sha256",
+                }
+                if set(artifact) != expected_fields:
+                    raise ConfigError("Stored seat artifact schema mismatch")
+                if artifact.get("seat_name") != seat_name or artifact.get("role") != role:
+                    raise ConfigError("Stored seat artifact does not match the requested seat")
+                invocation_sha256 = canonical_json_hash(invocation)
+                if artifact.get("invocation_sha256") != invocation_sha256:
+                    raise ConfigError("Stored seat artifact invocation does not match the request")
+                response = _validated_persisted_call_response(
+                    store,
+                    artifact.get("response"),
+                    artifact.get("response_evidence"),
+                    invocation=invocation,
+                    label=f"seat result for {seat_name}",
+                )
+                response_evidence = dict(artifact["response_evidence"])
+            else:
+                if _has_persisted_attempt_for_invocation(store, invocation):
+                    raise ConfigError(
+                        "Persisted seat attempt evidence exists without a reusable result; "
+                        "manual inspection is required before any redispatch"
+                    )
+                model_response, response_evidence = self._call(
+                    budget,
+                    store,
+                    budget_stage,
+                    seat_name,
+                    system,
+                    prompt,
+                    graph_budget=graph_budget,
+                )
+                response = model_response.to_dict()
+                store.write_json(
+                    "seat.json",
+                    {
+                        "seat_name": seat_name,
+                        "role": role,
+                        "response": response,
+                        "response_evidence": response_evidence,
+                        "invocation_sha256": canonical_json_hash(invocation),
+                    },
+                )
+
+            ledger = store.write_budget_snapshot(budget)
+            graph_ledger = None
+            graph_artifacts_dir = None
+            if graph_budget is not None:
+                graph_ledger, graph_artifacts_dir = graph_budget.snapshot()
+            result = {
+                "run_id": store.run_id,
+                "status": "completed",
+                "seat_name": seat_name,
+                "role": role,
+                "text": response["text"],
+                "response": response,
+                "response_evidence": response_evidence,
+                "ledger": ledger,
+                "graph_run_id": graph_run_id,
+                "graph_ledger": graph_ledger,
+                "graph_artifacts_dir": graph_artifacts_dir,
+                "artifacts_dir": str(store.directory),
+            }
+            store.write_json("result.json", result)
+            store.mark_stage("seat", "completed", "seat.json")
+            store.finish("completed")
+            return result
+        except RunAborted:
+            if accounting_initialized:
+                store.write_budget_snapshot(budget)
+            store.finish("aborted")
+            raise
+        except Exception:
+            if accounting_initialized:
+                store.write_budget_snapshot(budget)
+            store.finish("failed")
+            raise
+        finally:
+            store.close()
 
     def _run_panel(
         self,

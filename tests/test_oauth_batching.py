@@ -24,15 +24,20 @@ from relentless_inception.state import BudgetTracker
 def test_oauth_instructions_never_store_identity() -> None:
     claude = oauth_instructions("claude_oauth", load_config(include_user=False))
     grok = oauth_instructions("grok_oauth", load_config(include_user=False))
+    codex = oauth_instructions("codex_oauth", load_config(include_user=False))
     assert (
-        "env -u ANTHROPIC_API_KEY -u XAI_API_KEY claude"
+        "env -u ANTHROPIC_API_KEY -u XAI_API_KEY -u OPENAI_API_KEY claude"
         == claude["command"]
     )
     assert (
-        "env -u ANTHROPIC_API_KEY -u XAI_API_KEY grok"
+        "env -u ANTHROPIC_API_KEY -u XAI_API_KEY -u OPENAI_API_KEY grok"
         == grok["command"]
     )
-    rendered = json.dumps([claude, grok])
+    assert (
+        "env -u ANTHROPIC_API_KEY -u XAI_API_KEY -u OPENAI_API_KEY codex"
+        == codex["command"]
+    )
+    rendered = json.dumps([claude, grok, codex])
     assert "danrepaci" not in rendered.lower()
     assert "gmail.com" not in rendered.lower()
     assert "does not store" in claude["identity_hint_policy"]
@@ -94,6 +99,138 @@ def test_claude_oauth_adapter_isolates_prompt_and_unsets_api_key(
     assert "XAI_API_KEY" not in captured["env"]
     assert response.usage.cost_usd is None
     assert response.route["billing"] == "subscription"
+
+
+def _fake_codex_run(captured, *, usage=None, message="PONG", events=None):
+    """Mimic `codex exec --json`: JSONL on stdout, final message in a file."""
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        captured.update(kwargs)
+        message_path = Path(args[args.index("--output-last-message") + 1])
+        message_path.write_text(message, encoding="utf-8")
+        if "--output-schema" in args:
+            # The seat's temporary directory is removed once complete() returns,
+            # so the schema has to be read while the child is still "running".
+            schema_path = Path(args[args.index("--output-schema") + 1])
+            captured["schema"] = json.loads(schema_path.read_text(encoding="utf-8"))
+        stream = events if events is not None else [
+            {"type": "thread.started", "thread_id": "thread-abc"},
+            {"type": "turn.started"},
+            {
+                "type": "turn.completed",
+                "usage": usage
+                if usage is not None
+                else {
+                    "input_tokens": 11,
+                    "cached_input_tokens": 4,
+                    "output_tokens": 2,
+                    "reasoning_output_tokens": 7,
+                },
+            },
+        ]
+        return SimpleNamespace(
+            returncode=0,
+            stdout="\n".join(json.dumps(event) for event in stream),
+            stderr="",
+        )
+
+    return fake_run
+
+
+def test_codex_oauth_adapter_isolates_prompt_and_unsets_api_key(
+    isolated_runtime, monkeypatch
+) -> None:
+    captured = {}
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-reach-child")
+    monkeypatch.setattr("claude_fusion_drive.oauth.shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr("claude_fusion_drive.oauth.subprocess.run", _fake_codex_run(captured))
+
+    response = SubscriptionCliAdapter(load_config(include_user=False)).complete(
+        "sol-codex-panel",
+        system="Return PONG.",
+        prompt="PONG",
+    )
+
+    args = captured["args"]
+    assert response.text == "PONG"
+    assert args[1] == "exec"
+    assert "--ignore-user-config" in args
+    assert "--skip-git-repo-check" in args
+    assert "--ephemeral" in args
+    assert "--json" in args
+    assert args[-1] == "-", "the prompt must arrive on stdin, not in argv"
+    assert 'model_reasoning_effort="xhigh"' in args
+    assert "tools.web_search=false" in args
+    assert args[args.index("--sandbox") + 1] == "read-only"
+    # The prompt itself must never reach the process table.
+    assert "PONG" not in args
+    assert captured["input"].endswith("PONG\n")
+    # A stray metered key would silently bill the API instead of the subscription.
+    assert "OPENAI_API_KEY" not in captured["env"]
+    assert response.route["billing"] == "subscription"
+    assert response.route["tools_disabled"] is False
+    assert response.route["sandbox_policy"] == "read-only"
+    assert response.usage.cost_usd is None
+    assert response.request_id == "thread-abc"
+
+
+def test_codex_usage_counters_are_renamed_onto_envelope_names(
+    isolated_runtime, monkeypatch
+) -> None:
+    captured = {}
+    monkeypatch.setattr("claude_fusion_drive.oauth.shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr("claude_fusion_drive.oauth.subprocess.run", _fake_codex_run(captured))
+
+    response = SubscriptionCliAdapter(load_config(include_user=False)).complete(
+        "sol-codex-panel", system="s", prompt="p"
+    )
+
+    assert response.usage.input_tokens == 11
+    assert response.usage.output_tokens == 2
+    assert response.usage.reasoning_tokens == 7
+    assert response.usage.cached_tokens == 4
+    assert response.usage.input_output_usage_complete is True
+
+
+def test_codex_turn_failure_is_rejected(isolated_runtime, monkeypatch) -> None:
+    captured = {}
+    monkeypatch.setattr("claude_fusion_drive.oauth.shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(
+        "claude_fusion_drive.oauth.subprocess.run",
+        _fake_codex_run(
+            captured,
+            message="partial text that must not be trusted",
+            events=[
+                {"type": "thread.started", "thread_id": "thread-abc"},
+                {"type": "turn.failed", "error": {"message": "unsupported reasoning effort"}},
+            ],
+        ),
+    )
+
+    with pytest.raises(CapabilityError):
+        SubscriptionCliAdapter(load_config(include_user=False)).complete(
+            "sol-codex-panel", system="s", prompt="p"
+        )
+
+
+def test_codex_structured_output_writes_a_schema_file(isolated_runtime, monkeypatch) -> None:
+    captured = {}
+    monkeypatch.setattr("claude_fusion_drive.oauth.shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(
+        "claude_fusion_drive.oauth.subprocess.run",
+        _fake_codex_run(captured, message='{"verdict":"ok"}'),
+    )
+    schema = {"type": "object", "properties": {"verdict": {"type": "string"}}}
+
+    response = SubscriptionCliAdapter(load_config(include_user=False)).complete(
+        "sol-codex-panel", system="s", prompt="p", response_schema=schema
+    )
+
+    # Codex takes a schema file path, unlike the inline --json-schema the other CLIs accept.
+    assert "--output-schema" in captured["args"]
+    assert captured["schema"] == schema
+    assert response.text == '{"verdict":"ok"}'
 
 
 def test_claude_oauth_structured_output_is_canonical(

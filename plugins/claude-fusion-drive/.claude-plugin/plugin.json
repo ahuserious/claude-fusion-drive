@@ -1,13 +1,15 @@
 {
   "name": "claude-fusion-drive",
-  "version": "0.1.5",
-  "description": "Maximum-intelligence Claude Code planning, multi-model fusion, lifecycle gates, rescue, human simulation, and deterministic auto-evaluation.",
+  "displayName": "Claude Fusion Drive",
+  "version": "0.2.1",
+  "description": "Authorable Claude workflow graphs backed by frontier-model fusion, evidence gates, rescue, and deterministic evaluation.",
   "author": {
     "name": "DanBot",
     "url": "https://github.com/ahuserious"
   },
   "homepage": "https://github.com/ahuserious/claude-fusion-drive",
   "repository": "https://github.com/ahuserious/claude-fusion-drive",
+  "license": "MIT",
   "keywords": [
     "claude-code",
     "multi-agent",
@@ -19,24 +21,6 @@
     "rescue"
   ],
   "skills": "./skills/",
-  "mcpServers": "./.mcp.json",
-  "interface": {
-    "displayName": "Claude Fusion Drive",
-    "shortDescription": "Plan with fused frontier models and verify every execution gate",
-    "longDescription": "A Claude Code-first control plane with separately configurable in-harness and OpenRouter Fusion engines, explicit reasoning normalization, confirmation-backed goal handoff, Grok approval gates, rescue workflows, simulated-user loops, and deterministic HTML/SVG evaluation.",
-    "developerName": "DanBot",
-    "category": "Developer Tools",
-    "capabilities": [
-      "Interactive",
-      "Write"
-    ],
-    "websiteURL": "https://github.com/ahuserious/claude-fusion-drive",
-    "defaultPrompt": [
-      "Use Claude Fusion Drive to plan this with maximum intelligence",
-      "Show the proposed Fusion Drive workflow and full effective configuration",
-      "Run the Claude Fusion Drive auto-evaluation and produce its deterministic tearsheet"
-    ],
-    "brandColor": "#D6532B",
-    "screenshots": []
-  }
+  "workflows": "./workflows/",
+  "mcpServers": "./.mcp.json"
 }

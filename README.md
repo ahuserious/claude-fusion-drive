@@ -2,6 +2,96 @@
 
 Claude Fusion Drive is a Claude Code-first planning and verification plugin derived from Relentless Inception. It keeps the inherited multi-model provider/orchestration core, then adds a schema-v2 control plane for explicit reasoning normalization, separately configurable Fusion engines, confirmation-backed execution lifecycle, per-subagent presets, OAuth-safe CLI adapters, provider batching, rescue, simulated users, and deterministic auto-evaluation.
 
+## Fusion Harness and Fusion Drive
+
+[disler/fusion-harness](https://github.com/disler/fusion-harness) is a
+standalone Pi extension. It ships `/opinion`, `/fusion`, and `/auto-validate`,
+spawns clean-room `pi --mode json -p` children, and owns a custom split-column
+widget and footer. Its video presented `/debate`, `/parallel`, and `/coordinate`
+as **build-it patterns**, not as commands shipped by that upstream repository.
+
+Claude Fusion Drive 0.2.0 implements those three patterns, adds `best-of-n`, and
+ships all seven as namespaced Claude Dynamic Workflows. It uses Claude Code's
+native workflow graph and agent views instead of claiming an arbitrary Pi-style
+widget API. Configured frontier-model seats run through the Fusion Drive MCP;
+native Claude agents retain host tools, worktree isolation, and responsibility
+for any workspace changes.
+
+## Workflow commands
+
+| Command | Result |
+| --- | --- |
+| `/claude-fusion-drive:opinion` | Two configured external perspectives, no merge |
+| `/claude-fusion-drive:fusion` | Two external drafts, configured fusion, then one native deliverer |
+| `/claude-fusion-drive:auto-validate` | Validator-first RED gate, native build, immutable-gate verification, bounded repair |
+| `/claude-fusion-drive:debate` | Two configured positions, bounded rebuttals, one configured verdict |
+| `/claude-fusion-drive:parallel` | N native worktree workers, retaining every result with no merge |
+| `/claude-fusion-drive:coordinate` | Strict assignment graph, isolated native workers, verified integration |
+| `/claude-fusion-drive:best-of-n` | N configured candidates, configured judge, one native deliverer |
+
+Each command accepts a plain task or a structured argument object. Examples:
+
+```text
+/claude-fusion-drive:opinion Assess this API boundary
+/claude-fusion-drive:fusion {"task":"Design the smallest safe migration"}
+/claude-fusion-drive:auto-validate {"task":"Fix the failing parser","max_fixes":2}
+/claude-fusion-drive:debate {"task":"Monolith or services?","rounds":3}
+/claude-fusion-drive:parallel {"task":"Prototype the fix","workers":4}
+/claude-fusion-drive:coordinate {"task":"Implement the approved plan","workers":3}
+/claude-fusion-drive:best-of-n {"task":"Find the strongest design","n":5}
+```
+
+Open `/workflows` to inspect the native progress graph, phases, agent prompts,
+recent tools, results, tokens, and elapsed time. Use Enter/right to drill in,
+Escape/left to return, `p` to pause or resume, `x` to stop, `r` to restart an
+agent, and `s` to save a generated workflow. See
+[Workflow authoring](plugins/claude-fusion-drive/docs/WORKFLOW_AUTHORING.md) for the graph contract,
+argument limits, write isolation, and fail-closed review checklist.
+
+## Output, status, and provenance
+
+MCP calls keep terminal output quiet: the human-facing text is a bounded status
+or result summary, while the bounded machine receipt remains in
+`structuredContent`. Oversized receipts are saved in full at a private artifact
+path; the structured response carries that path plus size and section metadata
+instead of flooding context or returning malformed truncated JSON.
+
+External workflow rows are transparent native proxies. A proxy calls `seat_run`
+once and returns a strict boolean success/failure envelope; it is not itself
+the external model. Every external graph invocation shares one durable,
+profile/config-bound budget ledger, so separate nodes cannot reset call,
+token, cost, or approval thresholds. The receipt
+records the selected seat, provider, transport, requested model/reasoning,
+actual response evidence, cost ledger, and artifact directory. `seat_run`
+rejects native `claude_host` seats: external seats are tool-free and cannot use
+host MCP, shell, or workspace writes, while native `agent()` nodes own those
+actions. Complete model text remains available to downstream graph nodes rather
+than being silently sliced; bulky duplicate evidence remains artifact-backed.
+
+The plugin ships a clean `subagentStatusLine` for workflow-agent rows. The
+two-line `statusline.py` can also show Fusion Drive state plus the host model,
+context use, cost, and duration, but Claude's main `statusLine` is a user-global
+setting. Enable or compose it explicitly; installing the plugin does not
+replace an existing main status line.
+
+## Manual-first operation and upgrades
+
+Enabling the plugin does not automatically launch a workflow, spend on an
+external seat, write files, or install the global status line. Run a namespaced
+command explicitly, inspect its script and resolved configuration, and approve
+the workflow launch under the current Claude permission mode. Shell, web, and
+MCP calls outside the allowlist may still prompt. Workflows that contain native
+builders or integrators may write within their documented isolation boundary;
+external seats never do.
+
+Claude Code loads plugin manifests, workflow commands, and MCP tool definitions
+for the current session. After installing or upgrading Fusion Drive, finish or
+stop active workflow runs and start a new Claude Code session before validating
+the version. Otherwise the current session can retain an older command or MCP
+surface while files on disk already report 0.2.0. Dynamic Workflow pause/resume
+is current-session state; durable Fusion Drive receipts remain on disk, but a
+restarted host does not migrate an in-memory workflow run across versions.
+
 ## Default xai-claude-oauth workflow
 
 | Role | Model | Requested effort | Effective transport effort |
@@ -65,8 +155,9 @@ ledger, and does not become a fabricated `$0.00` charge or block the next call.
 
 `fuse_start` and `approval_gate_start` return durable job receipts immediately
 after explicit external-usage confirmation. Callers provide a stable
-idempotency key, poll with `job_status`, and retrieve a hash-verified result
-with `job_result`. `job_abort` writes the recoverable inherited kill switch; it
+idempotency key and normally use `job_wait` for one bounded wait plus a
+hash-verified result; `job_status` and `job_result` remain available for manual
+inspection. `job_abort` writes the recoverable inherited kill switch; it
 does not force-kill an in-flight provider call.
 
 Each private job directory persists the immutable request/configuration hashes,

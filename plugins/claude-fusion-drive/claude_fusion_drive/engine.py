@@ -13,8 +13,9 @@ from relentless_inception.providers import ProviderRegistry
 from .batching import execute_microbatch
 from .config import load_config, runtime_dir, validate_config
 from .errors import CapabilityError, ConfigurationError, ExternalActionRequired
+from .fallback import resolve_model
 from .lifecycle import initialize_lifecycle, record_gate
-from .oauth import SubscriptionCliAdapter
+from .oauth import CLI_OAUTH_TRANSPORTS, SubscriptionCliAdapter
 from .report import workflow_report
 from .util import canonical_hash, json_copy, text_hash
 
@@ -41,7 +42,7 @@ class HybridProviderRegistry(ProviderRegistry):
         drive_seat = self.drive_config.get("seats", {}).get(seat_name, {})
         provider_name = drive_seat.get("provider")
         transport = self.drive_config.get("providers", {}).get(provider_name, {}).get("transport")
-        if transport in {"claude_cli_oauth", "grok_cli_oauth"}:
+        if transport in CLI_OAUTH_TRANSPORTS:
             return self.oauth_adapter.complete(
                 seat_name,
                 system=system,
@@ -109,6 +110,7 @@ def _legacy_provider(
 def _legacy_seat(
     legacy: Mapping[str, Any],
     seat: Mapping[str, Any],
+    drive_config: Mapping[str, Any],
 ) -> dict[str, Any]:
     role = str(seat["role"])
     panel_template = (
@@ -123,12 +125,13 @@ def _legacy_seat(
         "verifier": "grok45_verifier",
     }[role]
     template = legacy["seats"][template_name]
+    seat_model = resolve_model(str(seat["model"]), drive_config)
     translated = copy.deepcopy(template)
     translated.update(
         {
             "enabled": bool(seat.get("enabled", True)),
             "provider": seat["provider"],
-            "model": seat["model"],
+            "model": seat_model,
             "role": "synthesizer" if role == "fuser" else role,
             "persona": seat["persona"],
             "reasoning_effort": seat["effective_reasoning"],
@@ -148,7 +151,7 @@ def _legacy_seat(
         translated["fusion"] = copy.deepcopy(seat["openrouter_fusion"])
     else:
         translated.pop("fusion", None)
-    if seat["model"] != template.get("model"):
+    if seat_model != template.get("model"):
         # Template pricing tables are per-model; a retargeted seat must report an
         # honest unknown cost rather than bill at the template model's rates.
         translated.pop("pricing", None)
@@ -180,7 +183,7 @@ def translate_config(
     if engine_name == "openrouter_fusion":
         legacy["providers"]["openrouter_fusion_api"]["enabled"] = True
     legacy["seats"] = {
-        name: _legacy_seat(load_legacy_config(include_user=False, validate=False), seat)
+        name: _legacy_seat(load_legacy_config(include_user=False, validate=False), seat, drive_config)
         for name, seat in drive_config["seats"].items()
         if drive_config["providers"][seat["provider"]]["transport"] != "claude_host"
     }
@@ -236,7 +239,7 @@ def translate_config(
             base_profile["budgets"][key] = copy.deepcopy(value)
     base_profile["execution"].update(
         {
-            "model": drive_profile["execution"]["model"],
+            "model": resolve_model(drive_profile["execution"]["model"], drive_config),
             "reasoning_effort": drive_profile["execution"]["reasoning"],
             "allow_recursive_claude_cli": False,
             "require_fused_plan": True,
@@ -254,9 +257,9 @@ def translate_config(
         {
             "enabled": True,
             "mode": "host_handoff",
-            "executor_model": drive_profile["execution"]["model"],
+            "executor_model": resolve_model(drive_profile["execution"]["model"], drive_config),
             "executor_reasoning_effort": drive_profile["execution"]["reasoning"],
-            "reviewer_models": ["claude-fable-5"],
+            "reviewer_models": [resolve_model("claude-fable-5", drive_config)],
             "reviewer_reasoning_effort": "xhigh",
             "require_fusion_before_execution": True,
             "require_gate_after_execution": True,
@@ -299,6 +302,137 @@ class FusionDriveEngine:
         legacy, translated_profile = translate_config(self.config, profile_name=profile_name)
         registry = HybridProviderRegistry(legacy, self.config)
         return FusionOrchestrator(legacy, registry=registry), translated_profile
+
+    def _seat_names_for_role(self, profile_name: str, role: str) -> list[str]:
+        profile = self.config.get("profiles", {}).get(profile_name)
+        if not isinstance(profile, Mapping):
+            raise ConfigurationError(f"Unknown Fusion Drive profile: {profile_name}")
+        engine_name = str(profile["engine"])
+        engine = self.config["engines"][engine_name]
+
+        # A server-managed Fusion endpoint is itself the fuser. Independent
+        # panel/judge nodes use its explicitly configured client fallback so a
+        # graph never pretends one server-managed call is several seats.
+        role_engine = engine
+        if engine.get("kind") == "server_managed" and role != "fuser":
+            fallback_name = engine.get("fallback_engine")
+            fallback = self.config.get("engines", {}).get(fallback_name)
+            if not isinstance(fallback, Mapping):
+                raise ConfigurationError(
+                    f"Engine {engine_name!r} has no client fallback for {role!r} nodes"
+                )
+            role_engine = fallback
+
+        if role == "panel":
+            names = [
+                *role_engine.get("panel", []),
+                *role_engine.get("optional_panel", []),
+            ]
+        elif role == "judge":
+            names = [role_engine.get("judge")]
+        elif role == "fuser":
+            names = [
+                engine.get("seat")
+                if engine.get("kind") == "server_managed"
+                else role_engine.get("fuser")
+            ]
+        elif role == "verifier":
+            gate_set = self.config["gate_sets"][profile["gate_set"]]
+            names = list(gate_set.get("reviewers", []))
+        else:
+            raise ConfigurationError(
+                "Seat role must be one of: panel, judge, fuser, verifier"
+            )
+
+        resolved = [str(name) for name in names if isinstance(name, str) and name]
+        if not resolved:
+            raise ConfigurationError(
+                f"Profile {profile_name!r} has no configured {role!r} seats"
+            )
+        return resolved
+
+    def seat_run(
+        self,
+        task: str,
+        *,
+        context: str = "",
+        profile_name: str | None = None,
+        role: str = "panel",
+        seat_index: int = 0,
+        cycle: bool = False,
+        seat_name: str | None = None,
+        resume_run_id: str | None = None,
+        graph_run_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Run one role-bound external model seat for a workflow graph node."""
+
+        selected_profile = profile_name or str(self.config["active_profile"])
+        role_seats = self._seat_names_for_role(selected_profile, role)
+        if seat_name is not None:
+            if seat_name not in role_seats:
+                raise ConfigurationError(
+                    f"Seat {seat_name!r} is not a configured {role!r} seat for "
+                    f"profile {selected_profile!r}; allowed={role_seats}"
+                )
+            selected_seat = seat_name
+        else:
+            if isinstance(seat_index, bool) or not isinstance(seat_index, int):
+                raise ConfigurationError("seat_index must be an integer")
+            if cycle:
+                selected_seat = role_seats[seat_index % len(role_seats)]
+            else:
+                minimum = -len(role_seats)
+                maximum = len(role_seats) - 1
+                if seat_index < minimum or seat_index > maximum:
+                    raise ConfigurationError(
+                        f"seat_index {seat_index} is outside [{minimum}, {maximum}] "
+                        f"for {role!r} seats"
+                    )
+                selected_seat = role_seats[seat_index]
+
+        seat = self.config["seats"][selected_seat]
+        provider = self.config["providers"][seat["provider"]]
+        if provider.get("transport") == "claude_host":
+            raise CapabilityError(
+                "seat_run only dispatches external tool-free seats; native Claude "
+                "workflow agents must use agent()"
+            )
+        if seat.get("enabled", True) is not True or provider.get("enabled", True) is not True:
+            raise CapabilityError(f"Selected seat or provider is disabled: {selected_seat}")
+
+        orchestrator, translated_profile = self._orchestrator(selected_profile)
+        budget_stage = {
+            "panel": "panel",
+            "fuser": "synthesis",
+            "judge": "gate",
+            "verifier": "gate",
+        }[role]
+        result = orchestrator.run_seat(
+            task,
+            selected_seat,
+            context=context,
+            profile_name=translated_profile,
+            run_id=resume_run_id,
+            graph_run_id=graph_run_id,
+            graph_profile_name=selected_profile,
+            budget_stage=budget_stage,
+        )
+        return {
+            **result,
+            "profile": selected_profile,
+            "engine": str(self.config["profiles"][selected_profile]["engine"]),
+            "selection": {
+                "role": role,
+                "seat_index": seat_index,
+                "cycled": cycle,
+                "seat_name": selected_seat,
+                "provider": seat["provider"],
+                "transport": provider["transport"],
+                "requested_model": seat["model"],
+                "requested_reasoning": seat["reasoning"],
+                "effective_reasoning": seat["effective_reasoning"],
+            },
+        }
 
     def fuse(
         self,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import unittest
 from pathlib import Path
 from typing import Any, Dict
@@ -26,6 +27,7 @@ REQUIRED_SKILLS = {
     "claude-fusion-drive-rescue",
     "human-sim-users",
     "auto-eval",
+    "claude-fusion-workflows",
 }
 
 
@@ -52,12 +54,8 @@ class PluginPackageIntegrityTests(unittest.TestCase):
     def test_plugin_manifest_references_bundled_mcp_and_skills(self) -> None:
         plugin_manifest = _load_json(PLUGIN_MANIFEST_PATH)
 
-        interface = plugin_manifest.get("interface")
-        self.assertIsInstance(interface, dict)
-        capabilities = interface.get("capabilities")
-        self.assertIsInstance(capabilities, list)
-        self.assertTrue(capabilities)
-        self.assertTrue(all(isinstance(capability, str) for capability in capabilities))
+        self.assertEqual(plugin_manifest.get("displayName"), "Claude Fusion Drive")
+        self.assertEqual(plugin_manifest.get("license"), "MIT")
 
         skills_root = self._resolve_inside(PLUGIN_ROOT, plugin_manifest["skills"])
         self.assertTrue(skills_root.is_dir(), skills_root)
@@ -71,11 +69,45 @@ class PluginPackageIntegrityTests(unittest.TestCase):
         self.assertEqual(mcp_manifest, MCP_MANIFEST_PATH.resolve())
         self.assertTrue(mcp_manifest.is_file(), mcp_manifest)
 
+        workflows_root = self._resolve_inside(
+            PLUGIN_ROOT,
+            plugin_manifest["workflows"],
+        )
+        self.assertTrue(workflows_root.is_dir(), workflows_root)
+        self.assertTrue(list(workflows_root.glob("*.js")))
+
+        settings = _load_json(PLUGIN_ROOT / "settings.json")
+        self.assertEqual(set(settings), {"subagentStatusLine"})
+
+    def test_workflow_skill_authoring_guide_link_is_bundled(self) -> None:
+        skill_manifest = (
+            PLUGIN_ROOT / "skills" / "claude-fusion-workflows" / "SKILL.md"
+        )
+        skill_text = skill_manifest.read_text(encoding="utf-8")
+        link_match = re.search(
+            r"\[WORKFLOW_AUTHORING\.md\]\(([^)]+)\)",
+            skill_text,
+        )
+        self.assertIsNotNone(link_match, "Workflow skill must link its authoring guide")
+
+        relative_guide_path = link_match.group(1)
+        self.assertFalse(Path(relative_guide_path).is_absolute())
+        guide_path = (skill_manifest.parent / relative_guide_path).resolve()
+        try:
+            guide_path.relative_to(PLUGIN_ROOT.resolve())
+        except ValueError:
+            self.fail(f"Workflow authoring guide is not bundled: {relative_guide_path}")
+        self.assertEqual(
+            guide_path,
+            (PLUGIN_ROOT / "docs" / "WORKFLOW_AUTHORING.md").resolve(),
+        )
+        self.assertTrue(guide_path.is_file(), guide_path)
+
     def test_release_identity_is_consistent_across_install_and_runtime_surfaces(self) -> None:
         plugin_manifest = _load_json(PLUGIN_MANIFEST_PATH)
         default_config = load_config(include_user=False)
 
-        self.assertEqual(fusion_drive_version, "0.1.5")
+        self.assertEqual(fusion_drive_version, "0.2.1")
         self.assertEqual(plugin_manifest.get("version"), fusion_drive_version)
         self.assertEqual(inherited_engine_version, "0.1.4")
         self.assertEqual(doctor(default_config)["version"], inherited_engine_version)

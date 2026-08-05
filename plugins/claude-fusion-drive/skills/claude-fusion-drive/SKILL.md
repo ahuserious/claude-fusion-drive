@@ -43,13 +43,14 @@ Fusion, a Fusion-driven implementation, or the `grok-fusion-drive` preset.
 
 1. Prefer `fuse_start` with the complete task, relevant context, mechanical
    evidence, a caller-stable idempotency key, and explicit external-usage
-   confirmation. Poll `job_status`, then call `job_result`. Use synchronous
-   `fuse` only for work known to fit within the host tool timeout.
+   confirmation. Use bounded `job_wait` calls until it returns the terminal,
+   hash-verified result; do not emit a stream of `job_status` calls. Use
+   synchronous `fuse` only for work known to fit within the host tool timeout.
 2. Preserve `workflow_id`, `plan_sha256`, `lifecycle_sha256`, raw panel evidence,
    judge output, synthesis, ledger, and handoff.
 3. Prefer `approval_gate_start` with stage `plan`, the exact synthesis artifact,
    the current lifecycle hash, a distinct stable idempotency key, and explicit
-   external-usage confirmation. Poll and hash-verify the job result.
+   external-usage confirmation. Use `job_wait` for the hash-verified result.
 4. If the gate is not `PASS`, revise only through bounded fusion/rescue cycles.
 5. Return all of the following to the user:
    - The fused plan.
@@ -144,6 +145,14 @@ merge is involved.
   explicit submission confirmation.
 - Grok 4.5 is rejected by the xAI Batch API.
 - OpenRouter has no configured general async completion Batch API.
+- Codex CLI OAuth (`codex_cli_oauth`, provider `codex_oauth`) bills the
+  ChatGPT subscription, not `OPENAI_API_KEY` — that variable is stripped from
+  the child so a metered key cannot silently take over. Seats run
+  `codex exec --ignore-user-config` under a read-only sandbox with web search
+  off. Codex is confined rather than tool-free, so its route reports
+  `tools_disabled: false`; prefer it where the seat is deliberating, not acting.
+  Effort accepts none/low/medium/high/xhigh/max — `minimal` is rejected
+  upstream and normalizes to `low`.
 - Claude/Grok CLI OAuth uses bounded isolated subprocess microbatches at
   concurrency one; this is not an API batch discount.
 - Concurrency and caching may improve throughput or cache billing but are not
@@ -167,10 +176,11 @@ merge is involved.
 
 ## Statusline and profile hotkeys
 
-- `statusline.py` (wired via Claude Code `statusLine`) shows: active profile,
-  panel/judge/fuser topology with effective reasoning, provider sign-in
-  state, mini-fuse on/off, live job/workflow status, Braintrust link state,
-  and numbered profile slots.
+- statusline.py consumes Claude Code's status JSON and shows a quiet,
+  width-aware two-line view: Fusion Drive run state, current Claude
+  model/effort, context usage, elapsed time, and cost. The main status line is
+  user-global, so enable it explicitly with cfd-setup-statusline; the plugin
+  cannot silently replace another status line.
 - Switch profiles with `fusion_ctl.py profile <slot-or-name>` (shell alias
   `fusion profile 2`, or `!fusion profile 2` from the Claude Code prompt);
   configure slots with `fusion_ctl.py slots set <n> <profile>`.
@@ -182,10 +192,9 @@ server cannot register anything in the Claude Code agent view — only work the
 host itself spawned appears there. Background Bash tasks *do* appear and are
 openable, so that is the supported way to watch seats:
 
-- When starting async work with `fuse_start`, also launch
-  `fusion watch <job-id>` (or bare `fusion watch` for all active jobs) as a
-  **background Bash task**. The user then reaches it with the left arrow and
-  sees per-seat status, model, and latency updating live.
+- Launch fusion watch for a job only when the user explicitly asks for the
+  external-seat detail view. Do not start a background watcher merely because
+  Fusion Drive is enabled.
 - `fusion watch --once` prints a single snapshot for inline use; `--interval
   <seconds>` sets the poll period (default 5). It exits by itself when the job
   reaches a terminal state, so it never lingers as a stuck background task.
@@ -197,10 +206,26 @@ Do not attempt to model individual seats as host subagents: the host Agent tool
 can only target Claude models, and a seat is a single tool-free schema-bound
 completion on Grok or GPT, not an agentic loop.
 
+## Where live work is visible
+
+Three surfaces, because a status line is drawn text and cannot be clicked:
+
+- **Status line, stack row**: the models actually dispatched for panel/judge/
+  fuser as short badges, the subagent review level, the planning mode, any
+  active `model_fallbacks` substitution (`fb5→op5`), and `▶ running/total
+  seats` for external fusion seats.
+- **Agent view** (left arrow): one selectable row per native subagent, rendered
+  by `subagentStatusLine`, showing label, type, status, and token count. This
+  is the surface to open when the question is "what is that agent doing".
+- **`fusion watch`** run as a background Bash task: per-seat fusion detail
+  (stage, live/failed counts, in-flight seats). Running it as a background task
+  is what registers it as an openable agent-view entry; an MCP server cannot
+  register one itself.
+
 ## Orchestration toggles (fusion-plan, preset, subagent review)
 
-Read the toggles from `<state>/statusline.json` (`"toggles"`; defaults:
-`fusion_plan` on, `preset` high, `subagent_review` on) or via
+Read the toggles from the state statusline.json ("toggles"; quiet defaults:
+fusion_plan off, preset high, subagent_review off) or via
 `fusion_ctl.py status`. They are host-orchestration hints, shown on the
 statusline:
 
