@@ -15,6 +15,8 @@ WORKFLOWS = ROOT / "plugins" / "claude-fusion-drive" / "workflows"
 EXPECTED_PHASES = {
     "opinion": ["Perspectives"],
     "fusion": ["Panel", "Fuse", "Deliver"],
+    "draco-fusion": ["Panel", "Judge", "Fuse"],
+    "plan-debate": ["Draft", "Debate", "Judge", "Fuse"],
     "auto-validate": ["Gate", "Build", "Verify", "Repair"],
     "debate": ["Open", "Rebut", "Verdict"],
     "parallel": ["Work"],

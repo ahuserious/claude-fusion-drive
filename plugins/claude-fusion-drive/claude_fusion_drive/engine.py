@@ -147,6 +147,12 @@ def _legacy_seat(
             "fallback_seats": [],
         }
     )
+    if "provider_routing" in seat:
+        # ProviderRegistry merges this over any provider-level preferences and emits
+        # it as the request's provider field, so a pinned seat keeps one upstream.
+        translated["provider_routing"] = copy.deepcopy(seat["provider_routing"])
+    else:
+        translated.pop("provider_routing", None)
     if "openrouter_fusion" in seat:
         translated["fusion"] = copy.deepcopy(seat["openrouter_fusion"])
     else:
@@ -297,6 +303,16 @@ class FusionDriveEngine:
     def __init__(self, config: Mapping[str, Any] | None = None):
         self.config = dict(config or load_config())
         os.environ.setdefault("RELENTLESS_INCEPTION_HOME", str(runtime_dir() / "engine"))
+        # Auto-load <runtime_dir>/secrets.env when present so the engine works
+        # identically as a Claude plugin, an MCP server, or a bare library call —
+        # no shell exports required. setdefault keeps any explicit operator
+        # override authoritative, and ProviderRegistry still enforces the
+        # owner-only 0600 mode before reading the file.
+        default_secrets_file = runtime_dir() / "secrets.env"
+        if default_secrets_file.is_file():
+            os.environ.setdefault(
+                "RELENTLESS_INCEPTION_SECRETS_FILE", str(default_secrets_file)
+            )
 
     def _orchestrator(self, profile_name: str | None = None) -> tuple[FusionOrchestrator, str]:
         legacy, translated_profile = translate_config(self.config, profile_name=profile_name)

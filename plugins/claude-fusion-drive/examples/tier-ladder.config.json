@@ -1,0 +1,711 @@
+{
+  "$doc": [
+    "User overlay for Claude Fusion Drive \u2014 deep-merged over config/fusion-drive.default.json by claude_fusion_drive.config.load_config().",
+    "Panel/judge/fuser composition replicates the DRACO 71.6 fusion result: independent panel -> compact JSON judge -> generative fuser. No majority vote, no averaging; lone-correct minority findings must survive.",
+    "Provider pins use seat.provider_routing, emitted verbatim as OpenRouter's `provider` field. All four pins were verified live against /api/v1/models/<model>/endpoints on 2026-08-07 \u2014 every pinned provider actually serves its model.",
+    "Output-token tiers follow the DRACO scripts: panel tool-loop turns 8000, panel synthesis 12000, judge 3000, fuser 8000. Judge and fuser are raised here (see $token_notes) because this panel feeds them more inputs than DRACO's did."
+  ],
+  "providers": {
+    "openrouter_api": {
+      "enabled": true
+    },
+    "codex_oauth": {
+      "enabled": true
+    }
+  },
+  "seats": {
+    "draco-panel-sol-codex": {
+      "enabled": true,
+      "provider": "codex_oauth",
+      "model": "gpt-5.6-sol",
+      "role": "panel",
+      "persona": "Independent systems and implementation panelist; trace constraints, edge cases, and failure modes to concrete evidence.",
+      "reasoning": "high",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 32000,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "structured_output": "panel_report"
+    },
+    "draco-panel-grok45": {
+      "enabled": true,
+      "provider": "openrouter_api",
+      "model": "x-ai/grok-4.5",
+      "role": "panel",
+      "persona": "Independent evidence-first researcher; surface falsifiable minority findings rather than converging on the obvious reading.",
+      "reasoning": "high",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 32000,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "structured_output": "panel_report",
+      "provider_routing": {
+        "only": [
+          "xai"
+        ],
+        "allow_fallbacks": false
+      }
+    },
+    "draco-panel-fable5": {
+      "enabled": true,
+      "provider": "openrouter_api",
+      "model": "anthropic/claude-fable-5",
+      "role": "panel",
+      "persona": "Independent constraint auditor; verify each claim against the stated requirements and name what the other readings would miss.",
+      "reasoning": "high",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 32000,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "structured_output": "panel_report",
+      "provider_routing": {
+        "only": [
+          "anthropic"
+        ],
+        "allow_fallbacks": false
+      }
+    },
+    "draco-panel-opus5": {
+      "enabled": true,
+      "provider": "openrouter_api",
+      "model": "anthropic/claude-opus-5",
+      "role": "panel",
+      "persona": "Independent constraint auditor (fallback seat for the fable-5 chair); verify claims against requirements and preserve dissent.",
+      "reasoning": "xhigh",
+      "effective_reasoning": "xhigh",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 32000,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "structured_output": "panel_report",
+      "provider_routing": {
+        "only": [
+          "anthropic"
+        ],
+        "allow_fallbacks": false
+      }
+    },
+    "draco-panel-deepseek-v4-pro": {
+      "enabled": true,
+      "provider": "openrouter_api",
+      "model": "deepseek/deepseek-v4-pro",
+      "role": "panel",
+      "persona": "Independent mechanical re-verifier; recompute the load-bearing steps and report where the derivation actually breaks.",
+      "reasoning": "high",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 32000,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "structured_output": "panel_report",
+      "provider_routing": {
+        "only": [
+          "baseten"
+        ],
+        "allow_fallbacks": false
+      }
+    },
+    "draco-judge-gemini": {
+      "enabled": true,
+      "provider": "openrouter_api",
+      "model": "google/gemini-3.1-pro-preview",
+      "role": "judge",
+      "persona": "Comparative judge over anonymised panel reports. Emit compact JSON only with EXACTLY these keys and no others: consensus, contradictions, partial_coverage, unique_insights, minority_findings, blind_spots, final_guidance. Each value is an array of strings. Do NOT include verification_priorities or any other key. Never write the final answer.",
+      "reasoning": "high",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 16000,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "structured_output": "judge_analysis",
+      "provider_routing": {
+        "order": [
+          "google-vertex",
+          "google-ai-studio"
+        ],
+        "allow_fallbacks": false
+      }
+    },
+    "draco-fuser-minimax": {
+      "enabled": true,
+      "provider": "openrouter_api",
+      "model": "minimax/minimax-m3",
+      "role": "fuser",
+      "persona": "Generative synthesiser. Write one fresh standalone answer from the original task, the raw panel reports, and the judge's diagnosis. Do not vote, average, or splice; preserve supported minority findings and resolve contradictions on evidence.",
+      "reasoning": "high",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "max_output_tokens": 32000,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "structured_output": "final_answer",
+      "provider_routing": {
+        "only": [
+          "venice"
+        ],
+        "allow_fallbacks": false
+      }
+    },
+    "t-light-qwen": {
+      "enabled": true,
+      "provider": "openrouter_api",
+      "model": "qwen/qwen3.7-flash",
+      "role": "panel",
+      "persona": "Independent implementer. Solve directly; concrete commands/edits and why they work.",
+      "reasoning": "high",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "max_output_tokens": 32000,
+      "structured_output": "panel_report",
+      "provider_routing": {
+        "only": [
+          "alibaba"
+        ],
+        "require_parameters": false,
+        "allow_fallbacks": true
+      }
+    },
+    "t-light-dsflash": {
+      "enabled": true,
+      "provider": "openrouter_api",
+      "model": "deepseek/deepseek-v4-flash-0731",
+      "role": "panel",
+      "persona": "Independent constraint auditor. Attack the obvious solution; separate what the task requires from what it appears to require.",
+      "reasoning": "high",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "max_output_tokens": 32000,
+      "structured_output": "panel_report",
+      "provider_routing": {
+        "require_parameters": false,
+        "allow_fallbacks": true
+      }
+    },
+    "t-light-luna": {
+      "enabled": true,
+      "provider": "openrouter_api",
+      "model": "openai/gpt-5.6-luna-pro",
+      "role": "panel",
+      "persona": "Independent mechanical re-verifier. Recompute load-bearing steps; state exactly where a proposed fix fails.",
+      "reasoning": "high",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "max_output_tokens": 32000,
+      "structured_output": "panel_report",
+      "provider_routing": {
+        "require_parameters": false,
+        "allow_fallbacks": true
+      }
+    },
+    "t-light-judge": {
+      "enabled": true,
+      "provider": "openrouter_api",
+      "model": "qwen/qwen3.7-flash",
+      "role": "judge",
+      "persona": "Comparative judge over anonymised panel reports. Emit compact JSON only with EXACTLY these keys and no others: consensus, contradictions, partial_coverage, unique_insights, minority_findings, blind_spots, final_guidance. Each value is an array of strings. Never write the final answer.",
+      "reasoning": "high",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "max_output_tokens": 16000,
+      "structured_output": "judge_analysis",
+      "provider_routing": {
+        "only": [
+          "alibaba"
+        ],
+        "require_parameters": false,
+        "allow_fallbacks": true
+      }
+    },
+    "t-light-fuser": {
+      "enabled": true,
+      "provider": "openrouter_api",
+      "model": "openai/gpt-5.6-luna-pro",
+      "role": "fuser",
+      "persona": "Generative synthesiser. One fresh standalone answer from task, raw panel reports, and judge diagnosis. No voting, averaging, or splicing; preserve supported minority findings; resolve contradictions on evidence.",
+      "reasoning": "high",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "max_output_tokens": 32000,
+      "structured_output": "final_answer",
+      "provider_routing": {
+        "require_parameters": false,
+        "allow_fallbacks": true
+      }
+    },
+    "t-med-qwen": {
+      "enabled": true,
+      "provider": "openrouter_api",
+      "model": "qwen/qwen3.7-flash",
+      "role": "panel",
+      "persona": "Independent implementer. Solve directly; concrete commands/edits and why they work.",
+      "reasoning": "high",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "max_output_tokens": 32000,
+      "structured_output": "panel_report",
+      "provider_routing": {
+        "only": [
+          "alibaba"
+        ],
+        "require_parameters": false,
+        "allow_fallbacks": true
+      }
+    },
+    "t-med-nemotron": {
+      "enabled": true,
+      "provider": "openrouter_api",
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "role": "panel",
+      "persona": "Independent constraint auditor. Attack the obvious solution; separate what the task requires from what it appears to require.",
+      "reasoning": "high",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "max_output_tokens": 32000,
+      "structured_output": "panel_report",
+      "provider_routing": {
+        "require_parameters": false,
+        "allow_fallbacks": true
+      }
+    },
+    "t-med-dspro": {
+      "enabled": true,
+      "provider": "openrouter_api",
+      "model": "deepseek/deepseek-v4-pro",
+      "role": "panel",
+      "persona": "Independent mechanical re-verifier. Recompute load-bearing steps; state exactly where a proposed fix fails.",
+      "reasoning": "high",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "max_output_tokens": 32000,
+      "structured_output": "panel_report",
+      "provider_routing": {
+        "only": [
+          "baseten"
+        ],
+        "require_parameters": false,
+        "allow_fallbacks": true
+      }
+    },
+    "t-med-luna": {
+      "enabled": true,
+      "provider": "openrouter_api",
+      "model": "openai/gpt-5.6-luna-pro",
+      "role": "panel",
+      "persona": "Independent planner. Produce a stepwise executable plan with risks, checkpoints, and rollback points.",
+      "reasoning": "high",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "max_output_tokens": 32000,
+      "structured_output": "panel_report",
+      "provider_routing": {
+        "require_parameters": false,
+        "allow_fallbacks": true
+      }
+    },
+    "draco-panel-sol-api": {
+      "enabled": true,
+      "provider": "openrouter_api",
+      "model": "openai/gpt-5.6-sol",
+      "role": "panel",
+      "persona": "Independent systems and implementation panelist; trace constraints, edge cases, and failure modes to concrete evidence.",
+      "reasoning": "high",
+      "effective_reasoning": "high",
+      "reasoning_max_tokens": null,
+      "timeout_seconds": 1200,
+      "tool_policy": "none",
+      "max_output_tokens": 32000,
+      "structured_output": "panel_report",
+      "provider_routing": {
+        "require_parameters": false,
+        "allow_fallbacks": true
+      }
+    }
+  },
+  "engines": {
+    "draco_fusion": {
+      "kind": "client_orchestrated",
+      "panel": [
+        "draco-panel-sol-codex",
+        "draco-panel-grok45",
+        "draco-panel-fable5",
+        "draco-panel-deepseek-v4-pro"
+      ],
+      "optional_panel": [
+        "draco-panel-opus5"
+      ],
+      "judge": "draco-judge-gemini",
+      "fuser": "draco-fuser-minimax",
+      "min_live_seats": 3,
+      "max_concurrency": 4,
+      "independent_first_pass": true,
+      "anonymize_model_identity": true,
+      "prohibit_majority_vote": true,
+      "preserve_minority_findings": true,
+      "max_fusion_depth": 1
+    },
+    "tier_light": {
+      "kind": "client_orchestrated",
+      "panel": [
+        "t-light-qwen",
+        "t-light-dsflash",
+        "t-light-luna"
+      ],
+      "optional_panel": [],
+      "judge": "t-light-judge",
+      "fuser": "t-light-fuser",
+      "min_live_seats": 2,
+      "max_concurrency": 3,
+      "independent_first_pass": true,
+      "anonymize_model_identity": true,
+      "prohibit_majority_vote": true,
+      "preserve_minority_findings": true,
+      "max_fusion_depth": 1
+    },
+    "tier_medium": {
+      "kind": "client_orchestrated",
+      "panel": [
+        "t-med-qwen",
+        "t-med-nemotron",
+        "t-med-dspro",
+        "t-med-luna"
+      ],
+      "optional_panel": [],
+      "judge": "draco-judge-gemini",
+      "fuser": "draco-fuser-minimax",
+      "min_live_seats": 3,
+      "max_concurrency": 4,
+      "independent_first_pass": true,
+      "anonymize_model_identity": true,
+      "prohibit_majority_vote": true,
+      "preserve_minority_findings": true,
+      "max_fusion_depth": 1
+    },
+    "tier_heavy_api": {
+      "kind": "client_orchestrated",
+      "panel": [
+        "draco-panel-sol-api",
+        "draco-panel-grok45",
+        "draco-panel-fable5",
+        "draco-panel-deepseek-v4-pro"
+      ],
+      "optional_panel": [
+        "draco-panel-opus5"
+      ],
+      "judge": "draco-judge-gemini",
+      "fuser": "draco-fuser-minimax",
+      "min_live_seats": 3,
+      "max_concurrency": 4,
+      "independent_first_pass": true,
+      "anonymize_model_identity": true,
+      "prohibit_majority_vote": true,
+      "preserve_minority_findings": true,
+      "max_fusion_depth": 1
+    },
+    "tier_ultra": {
+      "kind": "client_orchestrated",
+      "panel": [
+        "draco-panel-sol-codex",
+        "draco-panel-grok45",
+        "draco-panel-fable5",
+        "draco-panel-deepseek-v4-pro",
+        "draco-panel-opus5"
+      ],
+      "optional_panel": [],
+      "judge": "draco-judge-gemini",
+      "fuser": "draco-fuser-minimax",
+      "min_live_seats": 4,
+      "max_concurrency": 4,
+      "independent_first_pass": true,
+      "anonymize_model_identity": true,
+      "prohibit_majority_vote": true,
+      "preserve_minority_findings": true,
+      "max_fusion_depth": 1
+    }
+  },
+  "$token_notes": [
+    "Verified provider output caps (live, 2026-08-07): grok-4.5@xAI unset/ctx 500k \u00b7 gemini-3.1-pro@google-vertex 65536 \u00b7 minimax-m3@Venice 65536 \u00b7 deepseek-v4-pro@BaseTen 262144 \u00b7 fable-5/opus-5@Anthropic 128000. Every value below sits well inside its cap.",
+    "Panel 12000 = DRACO's --synthesis-max-tokens (its --max-tokens 8000 governs intermediate tool-loop turns, which these seats do not run: tool_policy is none).",
+    "Judge raised 3000 -> 8000. DRACO's judge emitted 6 keys; this judge's schema requires 8 (adds minority_findings and verification_priorities) and reads 4 panel reports. 3000 would truncate the JSON, and a truncated judge silently degrades the fuser.",
+    "Fuser raised 8000 -> 16000. DRACO fused 5 short-form benchmark answers; this fuser consumes 4x12000-token panel reports plus a richer judge blob, and its output is the only thing the caller sees. Truncating the fuser is the one failure that loses the whole run.",
+    "These are ceilings, not targets \u2014 seats bill on tokens actually produced, so the raises cost nothing on short tasks."
+  ],
+  "$wiring_notes": [
+    "gpt-5.6-sol runs on the codex plugin (provider codex_oauth, transport codex_cli_oauth, ChatGPT subscription auth) rather than OpenRouter, so the panel keeps a non-metered seat. Note codex_oauth has max_concurrency 1, so that seat serialises against other codex work.",
+    "grok-4.5 is reached through OpenRouter pinned to the xai upstream (BYOK), not the direct xai_api provider \u2014 one bill, one set of logs.",
+    "The drive seat schema has no per-seat fallback field (_legacy_seat hardcodes fallback_seats: []), so the opus-5 xhigh fallback for the fable-5 chair is wired as optional_panel rather than a true automatic failover. With min_live_seats 3 the gate still proceeds if the fable-5 chair dies; promoting opus-5 is currently a manual swap.",
+    "provider_routing support required two edits to the plugin: schemas/fusion-drive.schema.json gained the property (the seat object is additionalProperties:false), and claude_fusion_drive/engine.py::_legacy_seat now passes it through. relentless_inception/providers.py already merged seat.provider_routing into the request's provider field and needed no change."
+  ],
+  "active_profile": "draco-fusion",
+  "profiles": {
+    "draco-fusion": {
+      "engine": "draco_fusion",
+      "gate_set": "approval-gates",
+      "budgets": {
+        "enforcement": "hard_stop",
+        "unknown_cost_policy": "report_unknown",
+        "max_calls": 60,
+        "max_total_tokens": 2000000,
+        "max_input_tokens": 1400000,
+        "max_output_tokens": 600000,
+        "max_reasoning_tokens": null,
+        "max_tool_calls": 64,
+        "max_wall_seconds": null,
+        "max_cost_usd": 10.0,
+        "approval_threshold_usd": 5.0,
+        "warning_fraction": 0.8,
+        "reserve_fraction_for_synthesis_and_gates": 0.3
+      },
+      "execution": {
+        "owner": "claude_host",
+        "model": "claude-fable-5",
+        "reasoning": "xhigh",
+        "require_confirmed_plan": false,
+        "require_claude_goal": false,
+        "allow_recursive_claude_cli": false
+      }
+    },
+    "light": {
+      "engine": "tier_light",
+      "gate_set": "no-gates",
+      "budgets": {
+        "enforcement": "hard_stop",
+        "unknown_cost_policy": "report_unknown",
+        "max_calls": 60,
+        "max_total_tokens": 2000000,
+        "max_input_tokens": 1400000,
+        "max_output_tokens": 600000,
+        "max_reasoning_tokens": null,
+        "max_tool_calls": 64,
+        "max_wall_seconds": null,
+        "max_cost_usd": 1.0,
+        "approval_threshold_usd": 0.5,
+        "warning_fraction": 0.8,
+        "reserve_fraction_for_synthesis_and_gates": 0.3
+      },
+      "execution": {
+        "owner": "claude_host",
+        "model": "claude-fable-5",
+        "reasoning": "xhigh",
+        "require_confirmed_plan": false,
+        "require_claude_goal": false,
+        "allow_recursive_claude_cli": false
+      }
+    },
+    "medium": {
+      "engine": "tier_medium",
+      "gate_set": "no-gates",
+      "budgets": {
+        "enforcement": "hard_stop",
+        "unknown_cost_policy": "report_unknown",
+        "max_calls": 60,
+        "max_total_tokens": 2000000,
+        "max_input_tokens": 1400000,
+        "max_output_tokens": 600000,
+        "max_reasoning_tokens": null,
+        "max_tool_calls": 64,
+        "max_wall_seconds": null,
+        "max_cost_usd": 3.0,
+        "approval_threshold_usd": 1.5,
+        "warning_fraction": 0.8,
+        "reserve_fraction_for_synthesis_and_gates": 0.3
+      },
+      "execution": {
+        "owner": "claude_host",
+        "model": "claude-fable-5",
+        "reasoning": "xhigh",
+        "require_confirmed_plan": false,
+        "require_claude_goal": false,
+        "allow_recursive_claude_cli": false
+      }
+    },
+    "heavy": {
+      "engine": "draco_fusion",
+      "gate_set": "approval-gates",
+      "budgets": {
+        "enforcement": "hard_stop",
+        "unknown_cost_policy": "report_unknown",
+        "max_calls": 60,
+        "max_total_tokens": 2000000,
+        "max_input_tokens": 1400000,
+        "max_output_tokens": 600000,
+        "max_reasoning_tokens": null,
+        "max_tool_calls": 64,
+        "max_wall_seconds": null,
+        "max_cost_usd": 10.0,
+        "approval_threshold_usd": 5.0,
+        "warning_fraction": 0.8,
+        "reserve_fraction_for_synthesis_and_gates": 0.3
+      },
+      "execution": {
+        "owner": "claude_host",
+        "model": "claude-fable-5",
+        "reasoning": "xhigh",
+        "require_confirmed_plan": false,
+        "require_claude_goal": false,
+        "allow_recursive_claude_cli": false
+      }
+    },
+    "heavy-nogate": {
+      "engine": "draco_fusion",
+      "gate_set": "no-gates",
+      "budgets": {
+        "enforcement": "hard_stop",
+        "unknown_cost_policy": "report_unknown",
+        "max_calls": 60,
+        "max_total_tokens": 2000000,
+        "max_input_tokens": 1400000,
+        "max_output_tokens": 600000,
+        "max_reasoning_tokens": null,
+        "max_tool_calls": 64,
+        "max_wall_seconds": null,
+        "max_cost_usd": 10.0,
+        "approval_threshold_usd": 5.0,
+        "warning_fraction": 0.8,
+        "reserve_fraction_for_synthesis_and_gates": 0.3
+      },
+      "execution": {
+        "owner": "claude_host",
+        "model": "claude-fable-5",
+        "reasoning": "xhigh",
+        "require_confirmed_plan": false,
+        "require_claude_goal": false,
+        "allow_recursive_claude_cli": false
+      }
+    },
+    "heavy-api": {
+      "engine": "tier_heavy_api",
+      "gate_set": "approval-gates",
+      "budgets": {
+        "enforcement": "hard_stop",
+        "unknown_cost_policy": "report_unknown",
+        "max_calls": 60,
+        "max_total_tokens": 2000000,
+        "max_input_tokens": 1400000,
+        "max_output_tokens": 600000,
+        "max_reasoning_tokens": null,
+        "max_tool_calls": 64,
+        "max_wall_seconds": null,
+        "max_cost_usd": 10.0,
+        "approval_threshold_usd": 5.0,
+        "warning_fraction": 0.8,
+        "reserve_fraction_for_synthesis_and_gates": 0.3
+      },
+      "execution": {
+        "owner": "claude_host",
+        "model": "claude-fable-5",
+        "reasoning": "xhigh",
+        "require_confirmed_plan": false,
+        "require_claude_goal": false,
+        "allow_recursive_claude_cli": false
+      }
+    },
+    "ultra": {
+      "engine": "tier_ultra",
+      "gate_set": "approval-gates",
+      "budgets": {
+        "enforcement": "hard_stop",
+        "unknown_cost_policy": "report_unknown",
+        "max_calls": 60,
+        "max_total_tokens": 2000000,
+        "max_input_tokens": 1400000,
+        "max_output_tokens": 600000,
+        "max_reasoning_tokens": null,
+        "max_tool_calls": 64,
+        "max_wall_seconds": null,
+        "max_cost_usd": 25.0,
+        "approval_threshold_usd": 10.0,
+        "warning_fraction": 0.8,
+        "reserve_fraction_for_synthesis_and_gates": 0.3
+      },
+      "execution": {
+        "owner": "claude_host",
+        "model": "claude-fable-5",
+        "reasoning": "xhigh",
+        "require_confirmed_plan": false,
+        "require_claude_goal": false,
+        "allow_recursive_claude_cli": false
+      }
+    },
+    "ultra-nogate": {
+      "engine": "tier_ultra",
+      "gate_set": "no-gates",
+      "budgets": {
+        "enforcement": "hard_stop",
+        "unknown_cost_policy": "report_unknown",
+        "max_calls": 60,
+        "max_total_tokens": 2000000,
+        "max_input_tokens": 1400000,
+        "max_output_tokens": 600000,
+        "max_reasoning_tokens": null,
+        "max_tool_calls": 64,
+        "max_wall_seconds": null,
+        "max_cost_usd": 25.0,
+        "approval_threshold_usd": 10.0,
+        "warning_fraction": 0.8,
+        "reserve_fraction_for_synthesis_and_gates": 0.3
+      },
+      "execution": {
+        "owner": "claude_host",
+        "model": "claude-fable-5",
+        "reasoning": "xhigh",
+        "require_confirmed_plan": false,
+        "require_claude_goal": false,
+        "allow_recursive_claude_cli": false
+      }
+    }
+  },
+  "$draco_pass_2026_08_07": [
+    "Authoritative DRACO hyperparameters (verified against Lore-Hex/TrustedRouter-Fusion-Draco source, not the summary):",
+    "PANEL (draco_agentic_solo.py): max_tool_calls 16, tool-loop max_tokens 8000, synthesis_max_tokens 12000, temperature 0.2 (skipped for gpt-5.5*), reasoning_effort default None, workers 2, timeout 600s, length-retry ladder (8000,12000) +(16000,32000) for gpt-5.5.",
+    "JUDGE (draco_client_fusion.py): gemini-3.1-pro-preview, max_tokens 3000, response_format json_object. CORRECTIONS to the circulated summary: the fusion judge body sets NO temperature (0.0 was the TR grading judge) and NO reasoning_effort ('high' is fusion_live.py's GRADING default).",
+    "FUSER: minimax-m3, max_tokens 8000, temperature 0.2 explicit, no response_format; messages are TWO user turns (problem, then FINAL_INSTRUCTION+evidence+judge) with no system prompt; 5 attempts (first pinned, then unpinned) with 1.5s*n backoff and a >=50-char floor; cross-model fallback only if explicitly configured.",
+    "PROVIDER PIN: {'only':[p],'allow_fallbacks':false} \u2014 matches this config's provider_routing.",
+    "DELIBERATE divergences here: seats run reasoning high/xhigh per operator instruction (temperature is then provider-managed; the drive seat schema has no temperature field), ceilings raised because reasoning tokens bill as output, and panel identity is anonymised to judge/fuser (DRACO leaks model= names in panel evidence)."
+  ],
+  "$vertex_billing_note": "Judge pin is order[google-vertex, google-ai-studio]: the BYOK Vertex key's GCP project (formidable-bus-484218-v3) returned 403 BILLING_DISABLED on 2026-08-07. Enable billing on that project and Vertex becomes primary again automatically; AI Studio pin verified 200 the same day.",
+  "gate_sets": {
+    "no-gates": {
+      "enabled": false,
+      "fail_closed": true,
+      "reviewers": [
+        "grok45-gate-primary",
+        "grok45-gate-secondary"
+      ],
+      "required_passes": 2,
+      "max_concurrency": 2,
+      "max_revision_cycles": 2,
+      "requested_reasoning": "xhigh",
+      "effective_reasoning": "high"
+    }
+  },
+  "$tiers": [
+    "TIER LADDER \u2014 switch per call (fuse profile_name=..., seat_run profile=...) or persistently (config_set active_profile). No restart needed.",
+    "light  = qwen3.7-flash + deepseek-v4-flash + luna-pro panel \u00b7 qwen judge \u00b7 luna fuser \u00b7 NO gates (~cents).",
+    "medium = qwen + nemotron-super + deepseek-pro + luna (all ~1M ctx) \u00b7 gemini judge \u00b7 minimax fuser \u00b7 NO gates.",
+    "heavy  = draco frontier mix (sol via CODEX SUBSCRIPTION + grok/fable/deepseek API) \u00b7 gemini judge \u00b7 minimax fuser \u00b7 grok gates ON. heavy-nogate drops the gate; heavy-api swaps the sol chair to metered OpenRouter (billing switch, same hyperparameters).",
+    "ultra  = heavy + opus-5 xhigh promoted to a 5th live seat, min_live 4, gates ON, $25 cap.",
+    "INVARIANT across every tier: panel out=32000, judge out=16000, fuser out=32000, timeout 1200s, tool_policy none, reasoning high (opus seat xhigh; grok capped at high upstream). Changing a seat's model NEVER changes these knobs \u2014 swap the model string or seat only.",
+    "Judge always routes order[google-vertex, google-ai-studio] (Vertex primary once GCP billing is enabled)."
+  ]
+}

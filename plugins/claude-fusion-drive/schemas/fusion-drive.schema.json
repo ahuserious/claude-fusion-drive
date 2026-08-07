@@ -271,6 +271,16 @@
         "structured_output": {
           "type": "string"
         },
+        "provider_routing": {
+          "type": "object",
+          "description": "OpenRouter provider preferences emitted verbatim as the request's provider field. Pin with only + allow_fallbacks:false so a seat's upstream stays fixed and runs remain comparable.",
+          "properties": {
+            "only": { "type": "array", "items": { "type": "string" } },
+            "order": { "type": "array", "items": { "type": "string" } },
+            "allow_fallbacks": { "type": "boolean" }
+          },
+          "additionalProperties": true
+        },
         "openrouter_fusion": {
           "type": "object"
         }

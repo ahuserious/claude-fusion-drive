@@ -104,8 +104,8 @@
       "provider_preferences": {
         "allow_fallbacks": true,
         "require_parameters": true,
-        "data_collection": "deny",
-        "zdr": true,
+        "data_collection": "allow",
+        "zdr": false,
         "enforce_distillable_text": false,
         "order": [],
         "only": [],
@@ -148,8 +148,8 @@
       "provider_preferences": {
         "allow_fallbacks": true,
         "require_parameters": true,
-        "data_collection": "deny",
-        "zdr": true,
+        "data_collection": "allow",
+        "zdr": false,
         "enforce_distillable_text": false,
         "order": [],
         "only": [],
