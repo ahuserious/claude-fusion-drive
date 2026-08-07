@@ -116,7 +116,7 @@ class McpServerSmokeTests(unittest.TestCase):
         self.assertEqual(initialize["protocolVersion"], "2025-06-18")
         self.assertEqual(
             initialize["serverInfo"],
-            {"name": "claude-fusion-drive", "version": "0.2.2"},
+            {"name": "fusion-drive", "version": "0.2.2"},
         )
 
         tool_names = {tool["name"] for tool in responses[1]["result"]["tools"]}

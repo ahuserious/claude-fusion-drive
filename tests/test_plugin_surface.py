@@ -15,13 +15,13 @@ PLUGIN = ROOT / "plugins" / "claude-fusion-drive"
 def test_plugin_manifest_and_mcp_identity() -> None:
     manifest = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())
     mcp = json.loads((PLUGIN / ".mcp.json").read_text())
-    assert manifest["name"] == "claude-fusion-drive"
+    assert manifest["name"] == "fusion-drive"
     assert manifest["version"] == __version__
     assert manifest["displayName"] == "Claude Fusion Drive"
     assert manifest["skills"] == "./skills/"
     assert manifest["workflows"] == "./workflows/"
-    assert set(mcp["mcpServers"]) == {"claude-fusion-drive"}
-    assert mcp_server.SERVER_INFO == {"name": "claude-fusion-drive", "version": __version__}
+    assert set(mcp["mcpServers"]) == {"fusion-drive"}
+    assert mcp_server.SERVER_INFO == {"name": "fusion-drive", "version": __version__}
 
 
 def test_required_skills_exist() -> None:
@@ -33,6 +33,7 @@ def test_required_skills_exist() -> None:
         "human-sim-users",
         "auto-eval",
         "claude-fusion-workflows",
+        "ultraplan",
     }
     actual = {
         path.parent.name
@@ -88,7 +89,7 @@ def test_mcp_exposes_complete_control_plane() -> None:
 
 def test_mcp_initialize_and_tool_list_protocol() -> None:
     initialized = mcp_server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
-    assert initialized["result"]["serverInfo"]["name"] == "claude-fusion-drive"
+    assert initialized["result"]["serverInfo"]["name"] == "fusion-drive"
     listed = mcp_server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     assert len(listed["result"]["tools"]) == len(mcp_server.TOOLS)
 

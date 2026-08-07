@@ -79,7 +79,7 @@ import legacy_mcp_server as legacy
 
 
 os.environ.setdefault("RELENTLESS_INCEPTION_HOME", str(runtime_dir() / "engine"))
-SERVER_INFO = {"name": "claude-fusion-drive", "version": __version__}
+SERVER_INFO = {"name": "fusion-drive", "version": __version__}
 
 
 def _tool(

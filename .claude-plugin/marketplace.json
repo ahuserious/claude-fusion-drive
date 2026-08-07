@@ -1,5 +1,5 @@
 {
-  "name": "claude-fusion-drive",
+  "name": "fusion-drive",
   "owner": {
     "name": "DanBot",
     "url": "https://github.com/ahuserious"
@@ -10,7 +10,7 @@
   },
   "plugins": [
     {
-      "name": "claude-fusion-drive",
+      "name": "fusion-drive",
       "description": "Plan with fused frontier models and verify every execution gate from Claude Code.",
       "version": "0.2.2",
       "author": {

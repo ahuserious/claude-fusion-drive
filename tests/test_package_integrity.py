@@ -127,9 +127,9 @@ class PluginPackageIntegrityTests(unittest.TestCase):
         self.assertEqual(set(mcp_manifest), {"mcpServers"})
         mcp_servers = mcp_manifest["mcpServers"]
         self.assertIsInstance(mcp_servers, dict)
-        self.assertIn("claude-fusion-drive", mcp_servers)
+        self.assertIn("fusion-drive", mcp_servers)
 
-        server = mcp_servers["claude-fusion-drive"]
+        server = mcp_servers["fusion-drive"]
         self.assertIsInstance(server, dict)
         self.assertEqual(server.get("command"), "python3")
         self.assertIsInstance(server.get("args"), list)

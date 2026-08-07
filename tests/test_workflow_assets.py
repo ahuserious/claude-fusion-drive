@@ -17,6 +17,7 @@ EXPECTED_PHASES = {
     "fusion": ["Panel", "Fuse", "Deliver"],
     "draco-fusion": ["Panel", "Judge", "Fuse"],
     "plan-debate": ["Draft", "Debate", "Judge", "Fuse"],
+    "ultraplan": ["Stage", "Curate", "Debate", "Fuse"],
     "auto-validate": ["Gate", "Build", "Verify", "Repair"],
     "debate": ["Open", "Rebut", "Verdict"],
     "parallel": ["Work"],
